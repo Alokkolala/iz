@@ -43,7 +43,7 @@ export function AppShell() {
           </motion.div>
         </AnimatePresence>
       </div>
-      <BottomNav active={tab} onChange={setTab} />
+      <BottomNav active={tab} onChange={setTab} onOpenVoice={openVoice} />
       <AnimatePresence>
         {voiceOpen && <VoiceChat onClose={() => setVoiceOpen(false)} />}
       </AnimatePresence>

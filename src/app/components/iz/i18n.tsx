@@ -212,6 +212,7 @@ export const STRINGS: Dict = {
   open: { en: "Open", ru: "Открыть", kk: "Ашу" },
 
   // voice chat
+  voice_open_drop: { en: "Talk to Iz", ru: "Поговорить с Iz", kk: "Iz-пен сөйлесу" },
   voice_kicker: { en: "Talk to Iz", ru: "Поговори с Iz", kk: "Iz-пен сөйлес" },
   voice_title: { en: "Voice chat", ru: "Голосовой чат", kk: "Дауыстық чат" },
   voice_tap_to_talk: { en: "Tap the bead to talk", ru: "Нажми каплю, чтобы говорить", kk: "Сөйлесу үшін тамшыны бас" },
