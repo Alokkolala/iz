@@ -153,7 +153,7 @@ app.post('/api/voice/tts', async (req, res) => {
     if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'missing text' })
     }
-    const voiceId = typeof voice === 'string' && voice ? voice : 'alloy'
+    const voiceId = typeof voice === 'string' && voice ? voice : 'af_bella'
 
     const r = await fetch('https://openrouter.ai/api/v1/audio/speech', {
       method: 'POST',

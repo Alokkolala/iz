@@ -1,17 +1,15 @@
-import { Readable } from 'node:stream'
-
 export const config = {
   api: { bodyParser: { sizeLimit: '1mb' } },
   maxDuration: 30,
 }
 
 /**
- * TTS via OpenRouter, mirrors the dev server in server/index.js.
- * Model: hexgrad/kokoro-82m (open-source, much cheaper than OpenAI voices,
- * English-first; ru/kk quality is limited).
+ * TTS via OpenRouter. Model: hexgrad/kokoro-82m (cheap, fast, English-first).
+ * Default voice is `af_bella` (Kokoro voice naming: <lang><gender>_<name>).
  *
- * Streams the MP3 straight through so playback can start before generation finishes.
- * Vercel Fluid Compute supports response streaming on Node functions.
+ * Buffers the full MP3 before responding — Kokoro outputs are small (a few KB
+ * to ~100KB) so streaming gives no meaningful latency win and the buffered
+ * path is more reliable on Vercel Functions.
  */
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -23,7 +21,7 @@ export default async function handler(req, res) {
     if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'missing text' })
     }
-    const voiceId = typeof voice === 'string' && voice ? voice : 'alloy'
+    const voiceId = typeof voice === 'string' && voice ? voice : 'af_bella'
 
     const referer = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
@@ -45,15 +43,17 @@ export default async function handler(req, res) {
       }),
     })
 
-    if (!r.ok || !r.body) {
+    if (!r.ok) {
       const detail = await r.text().catch(() => '')
       console.error('tts upstream error', r.status, detail)
       return res.status(502).json({ error: 'tts upstream', status: r.status, detail })
     }
 
+    const buf = Buffer.from(await r.arrayBuffer())
     res.setHeader('Content-Type', 'audio/mpeg')
     res.setHeader('Cache-Control', 'no-store')
-    Readable.fromWeb(r.body).pipe(res)
+    res.setHeader('Content-Length', String(buf.length))
+    res.end(buf)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err?.message ?? 'tts failed' })
