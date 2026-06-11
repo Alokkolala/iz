@@ -138,22 +138,28 @@ ${SIGHT_CONTEXT}`
 
 /**
  * Text-to-speech via OpenRouter's `/api/v1/audio/speech` endpoint. Uses
- * `hexgrad/kokoro-82m` — an open-source TTS model, much cheaper than the
- * OpenAI voices. English-first; ru/kk quality is limited by the model.
+ * `openai/gpt-4o-mini-tts` — natural, low-latency, multilingual. We pass
+ * provider.openai.instructions so the model speaks in a casual road-trip tone
+ * instead of a flat news-reader voice.
  *
  * Streams the MP3 bytes straight through to the client so playback can start
  * before the whole file is generated.
- *
- * Note: `provider.options.openai.instructions` and `speed` are OpenAI-only —
- * Kokoro ignores them, so we omit them here.
  */
 app.post('/api/voice/tts', async (req, res) => {
   try {
-    const { text, voice } = req.body
+    const { text, lang, voice } = req.body
     if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'missing text' })
     }
-    const voiceId = typeof voice === 'string' && voice ? voice : 'af_bella'
+    const L = (lang === 'en' || lang === 'ru' || lang === 'kk') ? lang : 'ru'
+    const langName = LANG_NAME[L]
+    const voiceId = typeof voice === 'string' && voice ? voice : 'coral'
+
+    const instructions = `You are Iz — a friendly Mangystau travel guide having a real conversation with a friend on a road trip.
+Tone: warm, casual, low-key, like a close friend giving a tip — not a presenter or news anchor.
+Pace: relaxed and natural. Use small breaths and tiny pauses between thoughts.
+The text you are reading is written in ${langName}; speak it naturally in ${langName}.
+Do not add words, sound effects, or commentary — just read the text as if it were yours.`
 
     const r = await fetch('https://openrouter.ai/api/v1/audio/speech', {
       method: 'POST',
@@ -164,10 +170,16 @@ app.post('/api/voice/tts', async (req, res) => {
         'X-Title': 'IZ Mangystau · Voice',
       },
       body: JSON.stringify({
-        model: 'hexgrad/kokoro-82m',
+        model: 'openai/gpt-4o-mini-tts',
         input: text.slice(0, 3500),
         voice: voiceId,
         response_format: 'mp3',
+        speed: 1.02,
+        provider: {
+          options: {
+            openai: { instructions },
+          },
+        },
       }),
     })
 
