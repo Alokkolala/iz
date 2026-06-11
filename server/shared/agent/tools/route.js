@@ -10,13 +10,19 @@ async function geocode(name) {
     ? name
     : `${name}, Mangystau, Kazakhstan`
   const url = `${NOMINATIM}?q=${encodeURIComponent(q)}&format=json&limit=1&addressdetails=0`
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent':
-        'IzMangystauBot/1.0 (https://iz-psi.vercel.app)',
-      'Accept-Language': 'en,ru,kk',
-    },
-  })
+  let res
+  try {
+    res = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'IzMangystauBot/1.0 (https://iz-psi.vercel.app)',
+        'Accept-Language': 'en,ru,kk',
+      },
+      signal: AbortSignal.timeout(4000),
+    })
+  } catch {
+    return null
+  }
   if (!res.ok) return null
   const data = await res.json()
   const top = Array.isArray(data) ? data[0] : null
