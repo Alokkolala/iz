@@ -110,12 +110,42 @@ const OSM_TAGS = {
   fuel: ['amenity', 'fuel'],
   pharmacy: ['amenity', 'pharmacy'],
   atm: ['amenity', 'atm'],
+  bank: ['amenity', 'bank'],
+  hospital: ['amenity', 'hospital'],
   parking: ['amenity', 'parking'],
+  marketplace: ['amenity', 'marketplace'],
+  mosque: ['amenity', 'place_of_worship'],
   supermarket: ['shop', 'supermarket'],
+  mall: ['shop', 'mall'],
   hotel: ['tourism', 'hotel'],
   viewpoint: ['tourism', 'viewpoint'],
   attraction: ['tourism', 'attraction'],
   museum: ['tourism', 'museum'],
+  park: ['leisure', 'park'],
+  playground: ['leisure', 'playground'],
+  beach: ['natural', 'beach'],
+}
+
+// Super-categories: union of several OSM tags for vague queries like
+// "what's there to do" / "куда сходить" — returns mixed POIs.
+const OSM_UNIONS = {
+  things_to_do: [
+    ['tourism', 'attraction'],
+    ['tourism', 'viewpoint'],
+    ['tourism', 'museum'],
+    ['leisure', 'park'],
+    ['shop', 'mall'],
+  ],
+  food: [
+    ['amenity', 'restaurant'],
+    ['amenity', 'cafe'],
+    ['amenity', 'fast_food'],
+  ],
+  shopping: [
+    ['shop', 'mall'],
+    ['shop', 'supermarket'],
+    ['amenity', 'marketplace'],
+  ],
 }
 
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -135,10 +165,18 @@ function haversineKm(lat1, lon1, lat2, lon2) {
  * sparse. Returns at most 8 nearest, sorted by haversine distance.
  */
 async function searchOSMPlaces(category, lat, lon) {
-  const tag = OSM_TAGS[category] || OSM_TAGS.attraction
-  const [k, v] = tag
+  // Union super-categories combine multiple OSM tags in one query.
+  const tags = OSM_UNIONS[category]
+    ? OSM_UNIONS[category]
+    : [OSM_TAGS[category] || OSM_TAGS.attraction]
   const tryRadius = async (radius) => {
-    const q = `[out:json][timeout:10];(node["${k}"="${v}"](around:${radius},${lat},${lon});way["${k}"="${v}"](around:${radius},${lat},${lon}););out center 40;`
+    const parts = tags
+      .flatMap(([k, v]) => [
+        `node["${k}"="${v}"](around:${radius},${lat},${lon});`,
+        `way["${k}"="${v}"](around:${radius},${lat},${lon});`,
+      ])
+      .join('')
+    const q = `[out:json][timeout:15];(${parts});out center 60;`
     const r = await fetch('https://overpass-api.de/api/interpreter', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -152,6 +190,7 @@ async function searchOSMPlaces(category, lat, lon) {
   try {
     elements = await tryRadius(5000)
     if (elements.length === 0) elements = await tryRadius(20000)
+    if (elements.length === 0) elements = await tryRadius(50000)
   } catch (err) {
     console.warn('overpass failed', err?.message)
   }
@@ -396,42 +435,77 @@ const NEAR_KEYWORDS = [
   { cat: 'fuel',         needles: /заправ|бензин|fuel|gas station|petrol/i },
   { cat: 'pharmacy',     needles: /аптек|pharmacy|drugstore|лекарств/i },
   { cat: 'atm',          needles: /банкомат|atm|cash machine/i },
+  { cat: 'bank',         needles: /банк[^о]|\bbank\b|обмен валют|exchange office/i },
+  { cat: 'hospital',     needles: /больниц|госпитал|скорая|клиник|hospital|clinic|emergency room/i },
   { cat: 'parking',      needles: /парковк|parking|park the car/i },
+  { cat: 'mall',         needles: /\bтц\b|торгов.{0,4}центр|молл|mall|shopping(?: center| centre)?|трц/i },
+  { cat: 'marketplace',  needles: /базар|рынок|market(?:place)?/i },
+  { cat: 'mosque',       needles: /мечет|mosque|namaz|намаз/i },
   { cat: 'supermarket',  needles: /магазин|supermarket|grocery|продукт/i },
   { cat: 'hotel',        needles: /отель|гостиниц|hotel|переночев|hostel|stay the night/i },
   { cat: 'viewpoint',    needles: /смотровая|viewpoint|обзор|вид с/i },
   { cat: 'museum',       needles: /музей|museum/i },
+  { cat: 'park',         needles: /парк[^о]|сквер|park|playground|детская площадк/i },
+  { cat: 'beach',        needles: /пляж|beach/i },
   { cat: 'attraction',   needles: /достопримеч|attraction/i },
+  { cat: 'things_to_do', needles: /сходить|погулять|развлеч|что интересн|чем зан|what to do|things to do|fun nearby/i },
+  { cat: 'food',         needles: /покушать|перекус|перекусить|где едят/i },
+  { cat: 'shopping',     needles: /шопинг|шоппинг|купить|shopping/i },
 ]
 // NOTE: \b only handles Latin word boundaries in JS regex; for Cyrillic we
 // match substrings directly (the keywords are specific enough to avoid
 // false positives).
 const WEATHER_RE = /погод|прогноз|ауа рай|\bweather\b|\bforecast\b|температур|жарко|холодно|will it rain|дожд|ветер|снег|\bwind\b|sunrise|sunset|закат|восход/i
 const NEAR_GENERIC_RE = /(что|where).{0,8}(рядом|вокруг|around|near|nearby|close to me|поблизости|near me)/i
-const GO_RE = /(take me to|route to|поехали в|как добраться до|проложи маршрут|маршрут до|drive me to|navigate to)/i
+const GO_RE = /(take me to|route to|поехали в|как добраться до|проложи маршрут|маршрут до|маршрут для до|drive me to|navigate to)/i
+const NEAREST_RE = /(ближайш|nearest|closest|самый близкий|самой близкой)/i
+const RECALL_RE = /(ту точк|эту точк|что (?:ты )?показал|показал.{0,12}карт|что это (?:был[оа]|за)|where did you|that map|that pin|that point|тот пин|та метк)/i
 
 function classifyIntent(userText) {
   if (!userText) return null
   const s = String(userText).trim()
   if (!s) return null
+  // 0. RECALL — user is asking about the previous card. No fresh action; the
+  //    handler will inject memory into the prompt and let the model answer.
+  if (RECALL_RE.test(s)) return { kind: 'recall' }
   // 1. GO — explicit "take me to X"
   const go = s.match(GO_RE)
   if (go) {
     const after = s.slice(go.index + go[0].length).replace(/[?!.,]+$/, '').trim()
-    if (after) return { kind: 'go', destination: after }
+    if (after) {
+      // 1a. Compound: "route to nearest <category>" → search then directions
+      if (NEAREST_RE.test(after) || NEAREST_RE.test(s)) {
+        for (const { cat, needles } of NEAR_KEYWORDS) {
+          if (needles.test(after) || needles.test(s)) {
+            return { kind: 'go_nearest', category: cat }
+          }
+        }
+      }
+      // 1b. Compound: "route to <known sight>"
+      for (const { bucket, needles } of SIGHT_KEYWORDS) {
+        if (needles.test(after)) return { kind: 'go_sight', bucket, destination: after }
+      }
+      return { kind: 'go', destination: after }
+    }
   }
-  // 2. SIGHT — explicit landmark mention
+  // 2. NEAREST without GO — "where's the nearest ATM" → near (will sort by distance)
+  if (NEAREST_RE.test(s)) {
+    for (const { cat, needles } of NEAR_KEYWORDS) {
+      if (needles.test(s)) return { kind: 'near', category: cat }
+    }
+  }
+  // 3. SIGHT — explicit landmark mention
   for (const { bucket, needles } of SIGHT_KEYWORDS) {
     if (needles.test(s)) return { kind: 'sight', bucket }
   }
-  // 3. WEATHER — explicit weather words
+  // 4. WEATHER — explicit weather words
   if (WEATHER_RE.test(s)) return { kind: 'weather' }
-  // 4. NEAR — "what's around" generic, or a NEAR category keyword
+  // 5. NEAR — "what's around" generic, or a NEAR category keyword
   if (NEAR_GENERIC_RE.test(s)) {
     for (const { cat, needles } of NEAR_KEYWORDS) {
       if (needles.test(s)) return { kind: 'near', category: cat }
     }
-    return { kind: 'near', category: 'attraction' }
+    return { kind: 'near', category: 'things_to_do' }
   }
   for (const { cat, needles } of NEAR_KEYWORDS) {
     // a category keyword alone implies "near me" in this app's context
@@ -477,10 +551,40 @@ async function applyIntent(intent, location, L) {
     const url = `https://www.google.com/maps/dir/?api=1${origin}&destination=${dest}&travelmode=driving`
     return { kind: 'directions', destination: intent.destination, url }
   }
+  if (intent.kind === 'go_sight') {
+    const photos = pickReferences(intent.bucket, L).slice(0, 8)
+    const mapsQuery = encodeURIComponent(`${intent.bucket}, Mangystau, Kazakhstan`)
+    const origin =
+      location && Number.isFinite(location.lat) && Number.isFinite(location.lon)
+        ? `&origin=${location.lat},${location.lon}`
+        : ''
+    const url = `https://www.google.com/maps/dir/?api=1${origin}&destination=${mapsQuery}&travelmode=driving`
+    return { kind: 'directions', destination: intent.bucket, url, photos }
+  }
+  if (intent.kind === 'go_nearest' && location) {
+    // Compound: search → pick closest with coords → build directions URL
+    const items = await searchOSMPlaces(intent.category, location.lat, location.lon)
+    const target = items[0]
+    if (!target) {
+      // Fallback: just open Google Maps search for the category.
+      const listUrl = `https://www.google.com/maps/search/${encodeURIComponent(intent.category)}/@${location.lat},${location.lon},13z`
+      return { kind: 'directions', destination: intent.category, url: listUrl, missing: true }
+    }
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${location.lat},${location.lon}&destination=${target.lat},${target.lon}&travelmode=driving`
+    return {
+      kind: 'directions',
+      destination: target.name,
+      url,
+      category: intent.category,
+      target: { name: target.name, lat: target.lat, lon: target.lon, distance_km: target.distance_km },
+    }
+  }
+  // RECALL doesn't trigger a new action — handled via memory in the system prompt.
   return null
 }
 
-const GREETING_RE = /^\s*(привет|здравствуй|здарова|здорово|hi|hey|hello|hola|салам|сәлем|salem|капля|kaplya|капелька|iz|из|йо|yo)[\s!.,?]*$/i
+// Allow up to 3 greeting tokens in a row (e.g. "Привет капля", "Hi Iz!", "Hey hey hello").
+const GREETING_RE = /^\s*(?:(?:привет|здравствуй|здарова|здорово|hi|hey|hello|hola|салам|сәлем|salem|капля|kaplya|капелька|iz|из|йо|yo)[\s!.,?]*){1,3}$/i
 const GREETINGS = {
   en: [
     "Hey — I'm Iz. I know Mangystau cold: canyons, salt flats, weird stone balls. What do you want to see?",
@@ -504,11 +608,35 @@ const GREETING_SUGGS = {
   kk: ["Жақын маңда не бар?", "Бозжыраны көрсет", "Бүгінгі ауа райы"],
 }
 
+/**
+ * Build a one-line summary of the last card the app rendered, so the LLM has
+ * memory of its own actions and can answer "what was that point on the map?"
+ * without denying it ever showed anything.
+ */
+function summarizeLastAction(a) {
+  if (!a || typeof a !== 'object') return null
+  if (a.kind === 'weather') {
+    return `Last turn you showed a weather card: ${a.tempC}°C, ${a.label}, wind ${a.windKmh} km/h. Tomorrow ${a.tomorrow?.minC}–${a.tomorrow?.maxC}°C, ${a.tomorrow?.label}.`
+  }
+  if (a.kind === 'sight') {
+    return `Last turn you showed a photo reel of ${a.bucket} (${(a.photos || []).length} reference shots) with a Route CTA.`
+  }
+  if (a.kind === 'places') {
+    const top = (a.items || []).slice(0, 3).map((i) => `${i.name} (${i.distance_km} km)`).join(', ')
+    return `Last turn you showed a map of nearby ${a.category}: ${(a.items || []).length} results — ${top || 'none in range'}. The user CAN see this card.`
+  }
+  if (a.kind === 'directions') {
+    return `Last turn you opened directions to "${a.destination}".`
+  }
+  return null
+}
+
 app.post('/api/voice/chat', async (req, res) => {
   try {
-    const { messages, lang, location } = req.body
+    const { messages, lang, location, lastAction } = req.body
     const L = (lang === 'en' || lang === 'ru' || lang === 'kk') ? lang : 'ru'
     const langName = LANG_NAME[L]
+    const memoryLine = summarizeLastAction(lastAction)
 
     const hasLoc =
       location &&
@@ -528,6 +656,9 @@ app.post('/api/voice/chat', async (req, res) => {
     const locLine = hasLoc
       ? `The user is right now at latitude ${location.lat.toFixed(4)}, longitude ${location.lon.toFixed(4)}${location.place ? ` (near ${location.place})` : ''}. Tailor distances, drive times and "what's nearby" to that.`
       : `You don't know where the user is. If a recommendation needs their location, ask once, briefly.`
+    const memorySection = memoryLine
+      ? `\n\nMEMORY OF YOUR LAST ACTION: ${memoryLine}\nIf the user references "that map", "that pin", "ту точку", "что показал" — they mean THIS card. You DID show it. Acknowledge it, then answer their question about it. Never deny showing something this memory line describes.`
+      : ''
 
     const system = `You are Iz — a Mangystau local who knows the region cold. You're texting a traveler, not writing a brochure.
 
@@ -567,7 +698,7 @@ NO MARKER — for greetings, small talk, opinions, history facts, or general Man
 
 CRITICAL: If you're not sure between NEAR and SIGHT, pick SIGHT for named landmarks and NEAR for "around me" categories. If you're not sure between WEATHER and anything else, pick WEATHER for any weather question.
 
-SUGGESTIONS — ALWAYS end your reply with [[SUGG:a|b|c]] containing three short follow-up taps the user might want next, each ≤30 chars, in ${langName}. Make them concrete and different from each other. Example: [[SUGG:Какая погода?|Что рядом?|Покажи Шеркалу]]
+SUGGESTIONS — ALWAYS end your reply with [[SUGG:a|b|c]] containing three short follow-up taps the user might want next, each ≤30 chars, in ${langName}. Make them concrete and different from each other. Example: [[SUGG:Какая погода?|Что рядом?|Покажи Шеркалу]]${memorySection}
 
 ${SIGHT_CONTEXT}`
 

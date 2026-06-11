@@ -895,6 +895,11 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
     stopMic();
 
     try {
+      // Find the most recent assistant action so the server can inject memory
+      // ("MEMORY OF YOUR LAST ACTION: …") and stop denying cards it just showed.
+      const lastAssistantAction = [...messagesRef.current]
+        .reverse()
+        .find((m) => m.role === "assistant" && m.action)?.action ?? null;
       const res = await fetch("/api/voice/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -902,6 +907,7 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
           messages: next.map((m) => ({ role: m.role, content: m.text })),
           lang: langRef.current,
           location: locationRef.current,
+          lastAction: lastAssistantAction,
         }),
       });
       if (!res.ok) throw new Error("network");
