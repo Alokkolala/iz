@@ -967,6 +967,7 @@ function Bubble({
   labelRouteStops: string;
   labelOpenRoute: string;
   labelRecommendations: string;
+  recommendShowMe: string;
 }) {
   if (msg.role === "user") {
     return (
@@ -1058,7 +1059,7 @@ function Bubble({
           <RecommendCard
             action={msg.action}
             label={labelRecommendations}
-            onPickSight={(bucket) => onSuggestion(`Show me ${bucket}`)}
+            onPickSight={(bucket) => onSuggestion(`${recommendShowMe} ${bucket}`)}
           />
         )}
         {isLast && msg.suggestions && msg.suggestions.length > 0 && (
@@ -1889,6 +1890,7 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
                 labelRouteStops={t("voice_route_stops")}
                 labelOpenRoute={t("voice_open_route")}
                 labelRecommendations={t("voice_recommendations")}
+                recommendShowMe={t("voice_recommend_show_me")}
               />
             ))}
             {status === "thinking" && <TypingRow key="typing" />}

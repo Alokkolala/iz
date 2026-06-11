@@ -257,6 +257,7 @@ export const STRINGS: Dict = {
   voice_route_stops: { en: "Route", ru: "Маршрут", kk: "Бағыт" },
   voice_open_route: { en: "Open in Maps", ru: "Открыть маршрут", kk: "Картадан ашу" },
   voice_recommendations: { en: "For you", ru: "Тебе", kk: "Саған" },
+  voice_recommend_show_me: { en: "Show me", ru: "Покажи мне", kk: "Маған көрсет" },
 };
 
 interface I18nCtx {

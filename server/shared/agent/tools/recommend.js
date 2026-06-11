@@ -14,7 +14,7 @@ function pickSightForMood(mood, factsText) {
 }
 
 function timeOfDay(now = new Date()) {
-  const h = now.getUTCHours() + 5 // Aktau = UTC+5
+  const h = (now.getUTCHours() + 5) % 24 // Aktau = UTC+5
   if (h < 11) return 'morning'
   if (h < 16) return 'midday'
   if (h < 20) return 'afternoon'
