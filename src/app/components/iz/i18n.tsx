@@ -251,6 +251,8 @@ export const STRINGS: Dict = {
   voice_wind: { en: "Wind", ru: "Ветер", kk: "Жел" },
   voice_sunrise: { en: "Sunrise", ru: "Восход", kk: "Күн шығу" },
   voice_sunset: { en: "Sunset", ru: "Закат", kk: "Күн бату" },
+  voice_compose_placeholder: { en: "Ask anything…", ru: "Спроси что угодно…", kk: "Не болса да сұра…" },
+  voice_send: { en: "Send", ru: "Отправить", kk: "Жіберу" },
 };
 
 interface I18nCtx {
