@@ -471,7 +471,7 @@ ${SIGHT_CONTEXT}`
     const forced = await applyIntent(intent, hasLoc ? location : null, L)
     const finalAction = forced || parsed.action
 
-    res.json({ text: parsed.clean, action: finalAction, suggestions: parsed.suggestions })
+    res.json({ text: parsed.clean, action: finalAction, suggestions: parsed.suggestions, _debug: { intent, lastUser, hasLoc, forcedKind: forced?.kind, gitSha: 'd8c571f-classifier' } })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err?.message ?? 'voice chat failed' })
