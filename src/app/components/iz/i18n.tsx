@@ -238,6 +238,12 @@ export const STRINGS: Dict = {
   voice_open_maps: { en: "Open in Maps", ru: "Открыть в Картах", kk: "Картадан ашу" },
   voice_route_to: { en: "Route to", ru: "Маршрут до", kk: "Бағыт:" },
   voice_locating: { en: "Locating you…", ru: "Определяю вас…", kk: "Орныңызды табудамын…" },
+  voice_open_all: { en: "Open all", ru: "Все на карте", kk: "Барлығын ашу" },
+  voice_none_nearby: {
+    en: "Nothing found nearby — try a wider area",
+    ru: "Рядом ничего не нашлось — попробуйте шире",
+    kk: "Жақын маңда ештеңе табылмады",
+  },
 };
 
 interface I18nCtx {

@@ -98,30 +98,153 @@ Respond with ONLY valid JSON, no prose, matching this shape exactly:
 })
 
 /**
- * Pulls `[[GO:Place Name]]` out of the model reply (if present) and turns it
- * into a Google Maps directions action the frontend can render as a button.
- * The marker is stripped from the spoken text so TTS doesn't read it aloud.
+ * OpenStreetMap "amenity/tourism/shop" tags Iz is allowed to ask for.
+ * Mapping covers the natural categories a traveler asks about. Anything not
+ * in the table falls back to "tourist_attraction".
  */
-function extractDirections(text, location) {
-  if (!text) return { clean: '', action: null }
-  const m = text.match(/\[\[GO:\s*([^\]]+?)\s*\]\]/i)
-  if (!m) return { clean: text, action: null }
-  const destination = m[1].trim()
-  const clean = text.replace(m[0], '').replace(/\s{2,}/g, ' ').trim()
-  const dest = encodeURIComponent(
-    /mangystau|mangistau|kazakhstan/i.test(destination)
-      ? destination
-      : `${destination}, Mangystau, Kazakhstan`,
-  )
-  const origin =
-    location && Number.isFinite(location.lat) && Number.isFinite(location.lon)
-      ? `&origin=${location.lat},${location.lon}`
-      : ''
-  const url = `https://www.google.com/maps/dir/?api=1${origin}&destination=${dest}&travelmode=driving`
-  return {
-    clean,
-    action: { kind: 'directions', destination, url },
+const OSM_TAGS = {
+  cafe: ['amenity', 'cafe'],
+  restaurant: ['amenity', 'restaurant'],
+  fast_food: ['amenity', 'fast_food'],
+  bar: ['amenity', 'bar'],
+  fuel: ['amenity', 'fuel'],
+  pharmacy: ['amenity', 'pharmacy'],
+  atm: ['amenity', 'atm'],
+  parking: ['amenity', 'parking'],
+  supermarket: ['shop', 'supermarket'],
+  hotel: ['tourism', 'hotel'],
+  viewpoint: ['tourism', 'viewpoint'],
+  attraction: ['tourism', 'attraction'],
+  museum: ['tourism', 'museum'],
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371
+  const toRad = (d) => (d * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLon = toRad(lon2 - lon1)
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(a))
+}
+
+/**
+ * Hit the public Overpass endpoint for real OSM POIs around (lat, lon).
+ * Tries 5 km first, expands to 20 km if nothing comes back — Mangystau is
+ * sparse. Returns at most 8 nearest, sorted by haversine distance.
+ */
+async function searchOSMPlaces(category, lat, lon) {
+  const tag = OSM_TAGS[category] || OSM_TAGS.attraction
+  const [k, v] = tag
+  const tryRadius = async (radius) => {
+    const q = `[out:json][timeout:10];(node["${k}"="${v}"](around:${radius},${lat},${lon});way["${k}"="${v}"](around:${radius},${lat},${lon}););out center 40;`
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(q),
+    })
+    if (!r.ok) throw new Error(`overpass ${r.status}`)
+    const j = await r.json()
+    return Array.isArray(j.elements) ? j.elements : []
   }
+  let elements = []
+  try {
+    elements = await tryRadius(5000)
+    if (elements.length === 0) elements = await tryRadius(20000)
+  } catch (err) {
+    console.warn('overpass failed', err?.message)
+  }
+  const items = elements
+    .map((e) => {
+      const plat = e.lat ?? e.center?.lat
+      const plon = e.lon ?? e.center?.lon
+      if (!Number.isFinite(plat) || !Number.isFinite(plon)) return null
+      const t = e.tags || {}
+      const name = t['name:en'] || t.name || t.brand || null
+      if (!name) return null
+      return {
+        name,
+        lat: plat,
+        lon: plon,
+        addr: [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' ') || null,
+        distance_km: haversineKm(lat, lon, plat, plon),
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.distance_km - b.distance_km)
+    .slice(0, 6)
+    .map((p) => ({
+      ...p,
+      distance_km: Math.round(p.distance_km * 10) / 10,
+      url: `https://www.google.com/maps/dir/?api=1&origin=${lat},${lon}&destination=${p.lat},${p.lon}&travelmode=driving`,
+    }))
+  return items
+}
+
+/**
+ * Builds a bbox tight enough to show the user + every found place. Uses the
+ * OSM public embed (no key required) — a real interactive map that pans /
+ * zooms inside the chat bubble.
+ */
+function buildOSMEmbed(lat, lon, items) {
+  const lats = [lat, ...items.map((p) => p.lat)]
+  const lons = [lon, ...items.map((p) => p.lon)]
+  const pad = 0.01
+  const minLat = Math.min(...lats) - pad
+  const maxLat = Math.max(...lats) + pad
+  const minLon = Math.min(...lons) - pad
+  const maxLon = Math.max(...lons) + pad
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${minLon}%2C${minLat}%2C${maxLon}%2C${maxLat}&layer=mapnik&marker=${lat}%2C${lon}`
+}
+
+/**
+ * Strips the `[[GO:<place>]]` / `[[NEAR:<category>]]` markers out of the
+ * model reply and returns a structured action the frontend renders. The
+ * markers are never spoken — they're stage directions to the app.
+ */
+async function extractActions(text, location) {
+  if (!text) return { clean: '', action: null }
+  let clean = text
+  let action = null
+
+  const near = clean.match(/\[\[NEAR:\s*([a-z_]+)\s*\]\]/i)
+  if (near && location) {
+    const category = near[1].toLowerCase()
+    clean = clean.replace(near[0], '').replace(/\s{2,}/g, ' ').trim()
+    const items = await searchOSMPlaces(category, location.lat, location.lon)
+    const embedUrl =
+      items.length > 0
+        ? buildOSMEmbed(location.lat, location.lon, items)
+        : buildOSMEmbed(location.lat, location.lon, [])
+    const listUrl = `https://www.google.com/maps/search/${encodeURIComponent(category)}/@${location.lat},${location.lon},13z`
+    action = { kind: 'places', category, items, embedUrl, listUrl, origin: { lat: location.lat, lon: location.lon } }
+  }
+
+  const go = clean.match(/\[\[GO:\s*([^\]]+?)\s*\]\]/i)
+  if (go && !action) {
+    let destination = go[1].trim()
+    clean = clean.replace(go[0], '').replace(/\s{2,}/g, ' ').trim()
+    // Refuse coordinate-stuffed destinations — that's a misuse of the marker.
+    if (/-?\d+\.\d+\s*,\s*-?\d+\.\d+/.test(destination)) {
+      destination = destination.replace(/-?\d+\.\d+\s*,\s*-?\d+\.\d+/g, '').trim()
+    }
+    if (destination) {
+      const dest = encodeURIComponent(
+        /mangystau|mangistau|kazakhstan/i.test(destination)
+          ? destination
+          : `${destination}, Mangystau, Kazakhstan`,
+      )
+      const origin =
+        location && Number.isFinite(location.lat) && Number.isFinite(location.lon)
+          ? `&origin=${location.lat},${location.lon}`
+          : ''
+      const url = `https://www.google.com/maps/dir/?api=1${origin}&destination=${dest}&travelmode=driving`
+      action = { kind: 'directions', destination, url }
+    }
+  }
+
+  return { clean, action }
 }
 
 app.post('/api/voice/chat', async (req, res) => {
@@ -138,21 +261,35 @@ app.post('/api/voice/chat', async (req, res) => {
       ? `The user is right now at latitude ${location.lat.toFixed(4)}, longitude ${location.lon.toFixed(4)}${location.place ? ` (near ${location.place})` : ''}. Tailor distances, drive times and "what's nearby" to that.`
       : `You don't know where the user is. If a recommendation needs their location, ask once, briefly.`
 
-    const system = `You are Iz — a smart, friendly travel companion who happens to know Mangystau, Kazakhstan inside out. You sound like a close friend on a road trip, not a tour brochure.
+    const system = `You are Iz — a smart, friendly travel companion who knows Mangystau, Kazakhstan inside out. You sound like a close friend on a road trip, not a tour brochure.
 Speak entirely in ${langName}. No emojis, no markdown, no bullet lists.
 
-You have two superpowers:
-1. LIVE WEB SEARCH — use it freely for opening hours, current weather, road conditions, festivals, prices, news, or anything you're not sure about. Prefer fresh facts over guesses.
-2. MAPS — when the user wants to GO somewhere, BE SHOWN the way, get DIRECTIONS, or asks how to reach a place, end your reply with a single hidden marker on its own:
-   [[GO:<destination in English, e.g. "Bozzhyra Canyon">]]
-   Never mention or read the marker. The app turns it into a one-tap maps button.
+You have three superpowers. Choose at most ONE marker per reply, never both.
+
+1. LIVE WEB SEARCH — use it freely for opening hours, current weather, road conditions, festivals, prices, news, or anything you're not sure about. Prefer fresh facts over guessing.
+
+2. NEARBY PLACES — when the user asks what's NEAR them, AROUND, "что рядом", "what's close", "где поесть/заправиться/остановиться" — end your reply with EXACTLY ONE of these markers on its own line:
+   [[NEAR:cafe]] [[NEAR:restaurant]] [[NEAR:fast_food]] [[NEAR:bar]]
+   [[NEAR:fuel]] [[NEAR:hotel]] [[NEAR:supermarket]] [[NEAR:pharmacy]]
+   [[NEAR:atm]] [[NEAR:parking]] [[NEAR:viewpoint]] [[NEAR:attraction]] [[NEAR:museum]]
+   The app will then show a real map with up to 6 actual nearby places.
+   When you emit a NEAR marker, DO NOT invent or list place names in your sentence — just say something tight like "here are the closest cafes" or "let's see what's around". The map and cards do the listing.
+
+3. DIRECTIONS — when the user wants to GO to one specific named place ("take me to Bozzhyra", "show me the route to Sherkala"), end with:
+   [[GO:<clean English place name only, e.g. "Bozzhyra Canyon">]]
+   NEVER put coordinates, numbers, "near", queries or category words inside [[GO:...]]. Only a real place name.
+
+Marker rules:
+- Never mention, quote, or read the marker out loud. It is invisible stage directions for the app.
+- Use NEAR when the answer is "many options around here". Use GO only for a single specific destination.
+- If neither fits, no marker.
 
 How to talk:
 - Answer the user's actual question first, directly, in 1–3 short sentences.
 - Use contractions and casual phrasing. Match their energy.
-- Travel and Mangystau are your wheelhouse, but you can answer anything useful — don't refuse small talk or general questions, just keep replies tight.
-- If you searched the web, weave the fact in naturally (e.g. "looks like it's open till 8"), no need to cite.
-- If you genuinely don't know and search didn't help, say so in one sentence.
+- Travel and Mangystau are your wheelhouse, but you can answer general questions too — just keep replies tight.
+- If you searched the web, weave the fact in naturally (e.g. "looks like it's open till 8").
+- If you genuinely don't know, say so in one sentence.
 - ${locLine}
 
 ${SIGHT_CONTEXT}`
@@ -173,7 +310,7 @@ ${SIGHT_CONTEXT}`
     })
 
     const raw = completion.choices[0]?.message?.content?.trim() ?? ''
-    const { clean, action } = extractDirections(raw, hasLoc ? location : null)
+    const { clean, action } = await extractActions(raw, hasLoc ? location : null)
     res.json({ text: clean, action })
   } catch (err) {
     console.error(err)

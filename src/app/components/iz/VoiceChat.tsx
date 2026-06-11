@@ -31,12 +31,45 @@ const VoiceSphere = lazy(() => import("./VoiceSphere"));
  */
 type Status = "idle" | "listening" | "thinking" | "speaking" | "error";
 type DirectionsAction = { kind: "directions"; destination: string; url: string };
+type PlaceItem = {
+  name: string;
+  lat: number;
+  lon: number;
+  addr?: string | null;
+  distance_km: number;
+  url: string;
+};
+type PlacesAction = {
+  kind: "places";
+  category: string;
+  items: PlaceItem[];
+  embedUrl: string;
+  listUrl: string;
+  origin: { lat: number; lon: number };
+};
+type Action = DirectionsAction | PlacesAction;
 type Msg = {
   role: "user" | "assistant";
   text: string;
-  action?: DirectionsAction | null;
+  action?: Action | null;
 };
 type UserLocation = { lat: number; lon: number; place?: string };
+
+const CATEGORY_EMOJI: Record<string, string> = {
+  cafe: "☕",
+  restaurant: "🍽",
+  fast_food: "🍔",
+  bar: "🍸",
+  fuel: "⛽",
+  pharmacy: "💊",
+  atm: "🏧",
+  parking: "🅿️",
+  supermarket: "🛒",
+  hotel: "🏨",
+  viewpoint: "🌄",
+  attraction: "📍",
+  museum: "🏛",
+};
 
 /* ---- chat-bubble pieces (ported from ChatUI reference, tuned for the
  * dark voice-overlay backdrop) -------------------------------------------- */
@@ -70,6 +103,120 @@ function MapPinIcon({ size = 14 }: { size?: number }) {
       <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z" />
       <circle cx="12" cy="10" r="3" />
     </svg>
+  );
+}
+
+function PlacesCard({
+  action,
+  labelOpen,
+  labelOpenAll,
+  labelNone,
+}: {
+  action: PlacesAction;
+  labelOpen: string;
+  labelOpenAll: string;
+  labelNone: string;
+}) {
+  const emoji = CATEGORY_EMOJI[action.category] || "📍";
+  return (
+    <div
+      className="mt-2 w-full max-w-[320px] overflow-hidden rounded-2xl"
+      style={{
+        background: "rgba(255,255,255,0.08)",
+        border: "1px solid rgba(255,255,255,0.16)",
+        backdropFilter: "blur(14px)",
+        WebkitBackdropFilter: "blur(14px)",
+      }}
+    >
+      {/* live OSM map — free, no key, fully interactive (drag/zoom) */}
+      <div style={{ position: "relative", width: "100%", height: 160, background: "rgba(0,0,0,0.25)" }}>
+        <iframe
+          title={`Map of ${action.category}`}
+          src={action.embedUrl}
+          style={{ width: "100%", height: "100%", border: 0, display: "block" }}
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+        <a
+          href={action.listUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1"
+          style={{
+            background: "rgba(8,30,52,0.78)",
+            color: "#fff",
+            fontSize: 11,
+            fontWeight: 600,
+            textDecoration: "none",
+            border: "1px solid rgba(255,255,255,0.18)",
+          }}
+        >
+          <MapPinIcon size={11} />
+          {labelOpenAll}
+        </a>
+      </div>
+
+      {/* list of places */}
+      {action.items.length === 0 ? (
+        <div
+          className="px-3 py-3 text-center"
+          style={{ fontSize: 12, color: "rgba(255,255,255,0.72)" }}
+        >
+          {labelNone}
+        </div>
+      ) : (
+        <div className="flex flex-col" style={{ maxHeight: 220, overflowY: "auto" }}>
+          {action.items.map((p, i) => (
+            <a
+              key={`${p.lat}-${p.lon}-${i}`}
+              href={p.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-3 py-2 transition-colors"
+              style={{
+                borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
+                color: "#fff",
+                textDecoration: "none",
+              }}
+            >
+              <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden>
+                {emoji}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    lineHeight: 1.2,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {p.name}
+                </div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", lineHeight: 1.3 }}>
+                  {p.distance_km < 1
+                    ? `${Math.round(p.distance_km * 1000)} m`
+                    : `${p.distance_km} km`}
+                  {p.addr ? ` · ${p.addr}` : ""}
+                </div>
+              </div>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "var(--iz-accent)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {labelOpen} ↗
+              </span>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -121,10 +268,14 @@ function Bubble({
   msg,
   labelOpen,
   labelTo,
+  labelOpenAll,
+  labelNone,
 }: {
   msg: Msg;
   labelOpen: string;
   labelTo: string;
+  labelOpenAll: string;
+  labelNone: string;
 }) {
   if (msg.role === "user") {
     return (
@@ -178,6 +329,14 @@ function Bubble({
             action={msg.action}
             labelOpen={labelOpen}
             labelTo={labelTo}
+          />
+        )}
+        {msg.action?.kind === "places" && (
+          <PlacesCard
+            action={msg.action}
+            labelOpen={labelOpen}
+            labelOpenAll={labelOpenAll}
+            labelNone={labelNone}
           />
         )}
       </div>
@@ -503,14 +662,35 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
       if (!res.ok) throw new Error("network");
       const data = await res.json();
       const reply: string = (data?.text || "").trim();
-      const action: DirectionsAction | null =
-        data?.action && data.action.kind === "directions" && data.action.url
-          ? {
-              kind: "directions",
-              destination: String(data.action.destination ?? ""),
-              url: String(data.action.url),
-            }
-          : null;
+      let action: Action | null = null;
+      const a = data?.action;
+      if (a && a.kind === "directions" && a.url) {
+        action = {
+          kind: "directions",
+          destination: String(a.destination ?? ""),
+          url: String(a.url),
+        };
+      } else if (a && a.kind === "places" && a.embedUrl) {
+        action = {
+          kind: "places",
+          category: String(a.category ?? "attraction"),
+          embedUrl: String(a.embedUrl),
+          listUrl: String(a.listUrl ?? a.embedUrl),
+          origin: a.origin ?? { lat: 0, lon: 0 },
+          items: Array.isArray(a.items)
+            ? a.items
+                .filter((p: any) => p && Number.isFinite(p.lat) && Number.isFinite(p.lon))
+                .map((p: any) => ({
+                  name: String(p.name ?? ""),
+                  lat: Number(p.lat),
+                  lon: Number(p.lon),
+                  addr: p.addr ?? null,
+                  distance_km: Number(p.distance_km ?? 0),
+                  url: String(p.url ?? ""),
+                }))
+            : [],
+        };
+      }
       if (closedRef.current) return;
       if (!reply) {
         setStatus("idle");
@@ -765,6 +945,8 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
                 msg={m}
                 labelOpen={t("voice_open_maps")}
                 labelTo={t("voice_route_to")}
+                labelOpenAll={t("voice_open_all")}
+                labelNone={t("voice_none_nearby")}
               />
             ))}
             {status === "thinking" && <TypingRow key="typing" />}
