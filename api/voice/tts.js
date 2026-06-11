@@ -71,7 +71,10 @@ export default async function handler(req, res) {
       ? `https://${process.env.VERCEL_URL}`
       : 'http://localhost:5173'
 
-    // 1) Try Gemini TTS — PCM only, we wrap as WAV.
+    // VOICE CONSISTENCY: pin Gemini "Kore" only. The old Kokoro fallback
+    // (af_bella) sounded like a different person — that's what caused the
+    // "he keeps speaking with different voices" complaint. If Gemini blips,
+    // retry ONCE on the same model rather than swapping characters.
     const geminiVoice = typeof voice === 'string' && GEMINI_VOICES.has(voice) ? voice : 'Kore'
     let r = await speak({
       model: 'google/gemini-3.1-flash-tts-preview',
@@ -81,39 +84,34 @@ export default async function handler(req, res) {
       referer,
     })
 
-    if (r.ok) {
-      const pcm = Buffer.from(await r.arrayBuffer())
-      const header = buildWavHeader(pcm.length)
-      const wav = Buffer.concat([header, pcm])
-      res.setHeader('Content-Type', 'audio/wav')
-      res.setHeader('Cache-Control', 'no-store')
-      res.setHeader('Content-Length', String(wav.length))
-      res.setHeader('X-TTS-Model', 'google/gemini-3.1-flash-tts-preview')
-      return res.end(wav)
+    if (!r.ok) {
+      // One retry on the same voice — no character switching allowed.
+      const detail0 = await r.text().catch(() => '')
+      console.warn('gemini tts blipped, retrying same voice', r.status, detail0.slice(0, 120))
+      r = await speak({
+        model: 'google/gemini-3.1-flash-tts-preview',
+        voice: geminiVoice,
+        input: text,
+        format: 'pcm',
+        referer,
+      })
     }
 
-    // 2) Fallback to Kokoro MP3.
-    const detail = await r.text().catch(() => '')
-    console.warn('gemini tts failed, falling back to kokoro', r.status, detail)
-    const kokoroVoice = typeof voice === 'string' && voice.includes('_') ? voice : 'af_bella'
-    r = await speak({
-      model: 'hexgrad/kokoro-82m',
-      voice: kokoroVoice,
-      input: text,
-      format: 'mp3',
-      referer,
-    })
     if (!r.ok) {
-      const detail2 = await r.text().catch(() => '')
-      console.error('tts upstream error (both models)', r.status, detail2)
-      return res.status(502).json({ error: 'tts upstream', status: r.status, detail: detail2 })
+      const detail = await r.text().catch(() => '')
+      console.error('tts upstream error after retry', r.status, detail.slice(0, 200))
+      return res.status(502).json({ error: 'tts upstream', status: r.status })
     }
-    const mp3 = Buffer.from(await r.arrayBuffer())
-    res.setHeader('Content-Type', 'audio/mpeg')
+
+    const pcm = Buffer.from(await r.arrayBuffer())
+    const header = buildWavHeader(pcm.length)
+    const wav = Buffer.concat([header, pcm])
+    res.setHeader('Content-Type', 'audio/wav')
     res.setHeader('Cache-Control', 'no-store')
-    res.setHeader('Content-Length', String(mp3.length))
-    res.setHeader('X-TTS-Model', 'hexgrad/kokoro-82m')
-    res.end(mp3)
+    res.setHeader('Content-Length', String(wav.length))
+    res.setHeader('X-TTS-Model', 'google/gemini-3.1-flash-tts-preview')
+    res.setHeader('X-TTS-Voice', geminiVoice)
+    return res.end(wav)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err?.message ?? 'tts failed' })

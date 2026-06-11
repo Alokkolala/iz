@@ -1,7 +1,6 @@
 import express from 'express'
 import OpenAI from 'openai'
 import { z } from 'zod'
-import { Readable } from 'node:stream'
 import { pickReferences } from './references.js'
 
 const app = express()
@@ -846,61 +845,89 @@ ${SIGHT_CONTEXT}`
 })
 
 /**
- * Text-to-speech via OpenRouter's `/api/v1/audio/speech` endpoint. Uses
- * `openai/gpt-4o-mini-tts` — natural, low-latency, multilingual. We pass
- * provider.openai.instructions so the model speaks in a casual road-trip tone
- * instead of a flat news-reader voice.
+ * TTS via OpenRouter `/audio/speech`.
  *
- * Streams the MP3 bytes straight through to the client so playback can start
- * before the whole file is generated.
+ * Voice consistency: pin Gemini "Kore" only. The old Kokoro fallback (af_bella)
+ * sounded like a different person — that's what caused the "he keeps speaking
+ * with different voices" complaint. If Gemini blips, retry ONCE on the same
+ * voice rather than swapping characters.
+ *
+ * Gemini only outputs raw PCM (24kHz mono), so we prepend a 44-byte WAV header
+ * and serve `audio/wav` — the browser <audio> element plays it natively.
  */
+const GEMINI_VOICES = new Set([
+  'Kore', 'Charon', 'Puck', 'Aoede', 'Fenrir', 'Leda', 'Orus', 'Zephyr',
+])
+
+function buildWavHeader(pcmByteLength, { sampleRate = 24000, channels = 1, bitsPerSample = 16 } = {}) {
+  const byteRate = sampleRate * channels * bitsPerSample / 8
+  const blockAlign = channels * bitsPerSample / 8
+  const buf = Buffer.alloc(44)
+  buf.write('RIFF', 0)
+  buf.writeUInt32LE(36 + pcmByteLength, 4)
+  buf.write('WAVE', 8)
+  buf.write('fmt ', 12)
+  buf.writeUInt32LE(16, 16)
+  buf.writeUInt16LE(1, 20)
+  buf.writeUInt16LE(channels, 22)
+  buf.writeUInt32LE(sampleRate, 24)
+  buf.writeUInt32LE(byteRate, 28)
+  buf.writeUInt16LE(blockAlign, 32)
+  buf.writeUInt16LE(bitsPerSample, 34)
+  buf.write('data', 36)
+  buf.writeUInt32LE(pcmByteLength, 40)
+  return buf
+}
+
+async function speakGemini({ voice, input }) {
+  return fetch('https://openrouter.ai/api/v1/audio/speech', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'http://localhost:5173',
+      'X-Title': 'IZ Mangystau · Voice',
+    },
+    body: JSON.stringify({
+      model: 'google/gemini-3.1-flash-tts-preview',
+      input: input.slice(0, 3500),
+      voice,
+      response_format: 'pcm',
+    }),
+  })
+}
+
 app.post('/api/voice/tts', async (req, res) => {
   try {
-    const { text, lang, voice } = req.body
+    const { text, voice } = req.body
     if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'missing text' })
     }
-    const L = (lang === 'en' || lang === 'ru' || lang === 'kk') ? lang : 'ru'
-    const langName = LANG_NAME[L]
-    const voiceId = typeof voice === 'string' && voice ? voice : 'coral'
 
-    const instructions = `You are Iz — a friendly Mangystau travel guide having a real conversation with a friend on a road trip.
-Tone: warm, casual, low-key, like a close friend giving a tip — not a presenter or news anchor.
-Pace: relaxed and natural. Use small breaths and tiny pauses between thoughts.
-The text you are reading is written in ${langName}; speak it naturally in ${langName}.
-Do not add words, sound effects, or commentary — just read the text as if it were yours.`
+    const geminiVoice = typeof voice === 'string' && GEMINI_VOICES.has(voice) ? voice : 'Kore'
+    let r = await speakGemini({ voice: geminiVoice, input: text })
 
-    const r = await fetch('https://openrouter.ai/api/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'http://localhost:5173',
-        'X-Title': 'IZ Mangystau · Voice',
-      },
-      body: JSON.stringify({
-        model: 'openai/gpt-4o-mini-tts',
-        input: text.slice(0, 3500),
-        voice: voiceId,
-        response_format: 'mp3',
-        speed: 1.02,
-        provider: {
-          options: {
-            openai: { instructions },
-          },
-        },
-      }),
-    })
-
-    if (!r.ok || !r.body) {
-      const detail = await r.text().catch(() => '')
-      console.error('tts upstream error', r.status, detail)
-      return res.status(502).json({ error: 'tts upstream', status: r.status, detail })
+    if (!r.ok) {
+      const detail0 = await r.text().catch(() => '')
+      console.warn('gemini tts blipped, retrying same voice', r.status, detail0.slice(0, 120))
+      r = await speakGemini({ voice: geminiVoice, input: text })
     }
 
-    res.setHeader('Content-Type', 'audio/mpeg')
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '')
+      console.error('tts upstream error after retry', r.status, detail.slice(0, 200))
+      return res.status(502).json({ error: 'tts upstream', status: r.status })
+    }
+
+    const pcm = Buffer.from(await r.arrayBuffer())
+    const header = buildWavHeader(pcm.length)
+    const wav = Buffer.concat([header, pcm])
+    res.setHeader('Content-Type', 'audio/wav')
     res.setHeader('Cache-Control', 'no-store')
-    Readable.fromWeb(r.body).pipe(res)
+    res.setHeader('Content-Length', String(wav.length))
+    res.setHeader('X-TTS-Model', 'google/gemini-3.1-flash-tts-preview')
+    res.setHeader('X-TTS-Voice', geminiVoice)
+    return res.end(wav)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err?.message ?? 'tts failed' })
