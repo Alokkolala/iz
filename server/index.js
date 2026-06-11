@@ -381,29 +381,32 @@ async function extractActions(text, location, L) {
  * NEAR (around me). Returns { kind, payload } or null.
  */
 const SIGHT_KEYWORDS = [
-  { bucket: 'bozzhyra', needles: /бозжыр|бозжир|боszhyra|боszhira|bozzhyra|bozzhira|boszhira|bozjyra|клык|fangs/i },
+  { bucket: 'bozzhyra', needles: /бозжыр|бозжир|bozzhyra|bozzhira|boszhira|bozjyra|клык|fangs/i },
   { bucket: 'sherkala', needles: /шерқал|шеркал|sherkala|sherqala|shirkala|lion mountain/i },
   { bucket: 'tuzbair',  needles: /тузба|тұзбайыр|tuzbair|tuz bair|sor tuzbair|airakty|айракты/i },
-  { bucket: 'torysh',   needles: /торыш|долин.{0,6}шар|valley of balls|stone balls|torysh|torish|шар(?:ы|ов|ики)/i },
+  { bucket: 'torysh',   needles: /торыш|долин.{0,6}шар|valley of balls|stone balls|torysh|torish|шары|шаров|шарики/i },
   { bucket: 'kyzylkup', needles: /кызылкуп|қызылқұп|kyzylkup|qyzylqup|тирамису|tiramisu/i },
   { bucket: 'caspian',  needles: /каспий|каспи|caspian|актау|ақтау|aktau|набережн|promenade|coast|beach|пляж/i },
 ]
 const NEAR_KEYWORDS = [
   { cat: 'cafe',         needles: /кафе|кофе|cafe|coffee/i },
-  { cat: 'restaurant',   needles: /ресторан|поесть|пообедать|поужинать|restaurant|where to eat|еду\b|еда\b/i },
+  { cat: 'restaurant',   needles: /ресторан|поесть|пообедать|поужинать|restaurant|where to eat|еду|еда/i },
   { cat: 'fast_food',    needles: /фастфуд|fast food|burger|бургер|пицц/i },
-  { cat: 'bar',          needles: /\bбар\b|\bbar\b|выпить|drink/i },
+  { cat: 'bar',          needles: /бар|\bbar\b|выпить|drink/i },
   { cat: 'fuel',         needles: /заправ|бензин|fuel|gas station|petrol/i },
   { cat: 'pharmacy',     needles: /аптек|pharmacy|drugstore|лекарств/i },
   { cat: 'atm',          needles: /банкомат|atm|cash machine/i },
   { cat: 'parking',      needles: /парковк|parking|park the car/i },
   { cat: 'supermarket',  needles: /магазин|supermarket|grocery|продукт/i },
-  { cat: 'hotel',        needles: /отель|гостиниц|hotel|переночев|hostel|hostel|stay the night/i },
+  { cat: 'hotel',        needles: /отель|гостиниц|hotel|переночев|hostel|stay the night/i },
   { cat: 'viewpoint',    needles: /смотровая|viewpoint|обзор|вид с/i },
   { cat: 'museum',       needles: /музей|museum/i },
   { cat: 'attraction',   needles: /достопримеч|attraction/i },
 ]
-const WEATHER_RE = /\bпогод|\bпрогноз|ауа рай|\bweather\b|\bforecast\b|температур|жарко|холодно|will it rain|дожд|ветер|снег|wind\b|sunrise|sunset|закат|восход/i
+// NOTE: \b only handles Latin word boundaries in JS regex; for Cyrillic we
+// match substrings directly (the keywords are specific enough to avoid
+// false positives).
+const WEATHER_RE = /погод|прогноз|ауа рай|\bweather\b|\bforecast\b|температур|жарко|холодно|will it rain|дожд|ветер|снег|\bwind\b|sunrise|sunset|закат|восход/i
 const NEAR_GENERIC_RE = /(что|where).{0,8}(рядом|вокруг|around|near|nearby|close to me|поблизости|near me)/i
 const GO_RE = /(take me to|route to|поехали в|как добраться до|проложи маршрут|маршрут до|drive me to|navigate to)/i
 
