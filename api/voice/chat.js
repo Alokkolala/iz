@@ -126,13 +126,13 @@ async function searchOSMPlaces(category, lat, lon) {
   } catch (err) {
     console.warn('overpass failed', err?.message)
   }
-  const items = elements
+  const rawItems = elements
     .map((e) => {
       const plat = e.lat ?? e.center?.lat
       const plon = e.lon ?? e.center?.lon
       if (!Number.isFinite(plat) || !Number.isFinite(plon)) return null
       const t = e.tags || {}
-      const name =
+      let name =
         t['name:en'] ||
         t.name ||
         t['name:ru'] ||
@@ -140,6 +140,9 @@ async function searchOSMPlaces(category, lat, lon) {
         t.brand ||
         t.operator ||
         (t.amenity || t.shop || t.tourism || t.leisure || category).replace(/_/g, ' ')
+      if (name && name === name.toLowerCase()) {
+        name = name.charAt(0).toUpperCase() + name.slice(1)
+      }
       return {
         name,
         lat: plat,
@@ -150,6 +153,16 @@ async function searchOSMPlaces(category, lat, lon) {
     })
     .filter(Boolean)
     .sort((a, b) => a.distance_km - b.distance_km)
+  const seen = []
+  const items = rawItems
+    .filter((p) => {
+      const dup = seen.find(
+        (s) => s.name.toLowerCase() === p.name.toLowerCase() && haversineKm(s.lat, s.lon, p.lat, p.lon) < 0.08,
+      )
+      if (dup) return false
+      seen.push(p)
+      return true
+    })
     .slice(0, 6)
     .map((p) => ({
       ...p,
@@ -356,9 +369,11 @@ const NEAR_KEYWORDS = [
 ]
 const WEATHER_RE = /погод|прогноз|ауа рай|\bweather\b|\bforecast\b|температур|жарко|холодно|will it rain|дожд|ветер|снег|\bwind\b|sunrise|sunset|закат|восход/i
 const NEAR_GENERIC_RE = /(что|where).{0,8}(рядом|вокруг|around|near|nearby|close to me|поблизости|near me)/i
-const GO_RE = /(take me to|route to|поехали в|как добраться до|проложи маршрут|маршрут до|маршрут для до|drive me to|navigate to)/i
+const GO_RE = /(take me to|route to|поехали в|как добраться до|проложи маршрут|маршрут до|маршрут для до|drive me to|navigate to|проводи меня|проводи до)/i
 const NEAREST_RE = /(ближайш|nearest|closest|самый близкий|самой близкой)/i
 const RECALL_RE = /(ту точк|эту точк|что (?:ты )?показал|показал.{0,12}карт|что это (?:был[оа]|за)|where did you|that map|that pin|that point|тот пин|та метк)/i
+const NEAR_VERB_RE = /(скажи|найди|поищ|посовет|покажи мне|подскажи|есть ли|какие|какой|какая|какое|самый|самая|самое|самые|лучш|новейш|tell me|find me?|show me|which|what(?:'s| is) the|recommend|nearest|best|newest)/i
+const SUPERLATIVE_RE = /(самый|самая|самое|самые|лучш|новейш|новая|новый|новое|новые|best|newest|nicest|fanciest|cheapest|самый дешёв|самый дорог)/i
 
 function classifyIntent(userText) {
   if (!userText) return null
@@ -398,8 +413,12 @@ function classifyIntent(userText) {
     return { kind: 'near', category: 'things_to_do' }
   }
   for (const { cat, needles } of NEAR_KEYWORDS) {
-    if (needles.test(s) && /рядом|вокруг|around|near|поблизост|закрыт|открыт|где|where/i.test(s)) {
-      return { kind: 'near', category: cat }
+    if (
+      needles.test(s) &&
+      (/рядом|вокруг|around|near|поблизост|закрыт|открыт|где|where/i.test(s) ||
+        NEAR_VERB_RE.test(s))
+    ) {
+      return { kind: 'near', category: cat, superlative: SUPERLATIVE_RE.test(s) }
     }
   }
   return null
@@ -544,6 +563,13 @@ function narrateForcedAction(intent, action, L) {
       }[L]
     }
     const closest = action.items[0]
+    if (intent.superlative) {
+      return {
+        en: `Can't filter by newest from the map, but the closest ${n} are here — ${closest.name} is just ${closest.distance_km} km away.`,
+        ru: `По "самым новым" не отсортирую, но вот ближайшие ${n} — ${closest.name} всего в ${closest.distance_km} км.`,
+        kk: `«Ең жаңасы» бойынша сұрыптай алмаймын, бірақ ең жақын ${n} осы — ${closest.name} ${closest.distance_km} км.`,
+      }[L]
+    }
     return {
       en: `${n} around you — closest is ${closest.name}, ${closest.distance_km} km.`,
       ru: `${n} вокруг — ближе всех ${closest.name}, ${closest.distance_km} км.`,
