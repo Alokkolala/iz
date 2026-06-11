@@ -10,6 +10,7 @@ type AuthCtx = {
   signUp: (email: string, password: string) => Promise<{ error: string | null }>
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
+  updatePassword: (newPassword: string) => Promise<{ error: string | null }>
 }
 
 const Ctx = createContext<AuthCtx | null>(null)
@@ -48,6 +49,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     async signOut() {
       await supabase.auth.signOut()
+    },
+    async updatePassword(newPassword) {
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      return { error: error?.message ?? null }
     },
   }
 

@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { Camera, MapPin, Sun, ArrowRight, ArrowUpRight } from "./Icons";
+import { Camera, MapPin, Sun, ArrowRight, ArrowUpRight, Sparkles } from "./Icons";
 import { Stone3D } from "./Stone3D";
 import { Card, Button, IconChip, Overline } from "./ui";
 import { ImageWithFallback } from "../figma/ImageWithFallback";
@@ -9,6 +9,9 @@ import { useI18n } from "./i18n";
 import { LangSwitcher } from "./LangSwitcher";
 import { useStore } from "./store";
 import { goldenHour } from "./sun";
+import { useAuth } from "../../../lib/AuthProvider";
+import { listAnalyses, type SavedAnalysis } from "../../../lib/db";
+import { ProfileAvatar } from "./ProfileAvatar";
 
 interface TouristPulseProps {
   onNavigate: (tab: TabId) => void;
@@ -24,7 +27,13 @@ const PHOTO_TUZBAIR = "https://images.unsplash.com/photo-1775484866877-3e55f1f44
 export function TouristPulse({ onNavigate }: TouristPulseProps) {
   const { t } = useI18n();
   const { name, shots, spots } = useStore();
+  const { user } = useAuth();
   const golden = useMemo(() => goldenHour(), []);
+  const [lastAnalysis, setLastAnalysis] = useState<SavedAnalysis | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    listAnalyses(user.id, 1).then((xs) => setLastAnalysis(xs[0] ?? null)).catch(() => {});
+  }, [user?.id]);
 
   const journey = [
     { label: t("shots"), value: shots, Icon: Camera },
@@ -47,12 +56,29 @@ export function TouristPulse({ onNavigate }: TouristPulseProps) {
             {name ? t("greet_hi").replace("Iz", name) : t("greet_hi")}
           </p>
         </div>
-        <LangSwitcher />
+        <div className="flex items-center gap-2">
+          <LangSwitcher />
+          <ProfileAvatar onClick={() => onNavigate("profile")} />
+        </div>
       </div>
 
       <h1 className="font-display" style={{ fontSize: 27, lineHeight: 1.12, fontWeight: 700, color: "var(--iz-ink)", marginTop: -8 }}>
         {t("pulse_title")}
       </h1>
+
+      {/* Continue where you left off */}
+      {lastAnalysis && (
+        <motion.div {...rise(0)}>
+          <Card className="flex items-center gap-3 p-4">
+            <IconChip tone="accent" size={42}><Sparkles size={20} strokeWidth={2.1} /></IconChip>
+            <div className="min-w-0 flex-1">
+              <p style={{ fontSize: 11, color: "var(--iz-ink-3)", letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 600 }}>{t("continue_card")}</p>
+              <p className="truncate" style={{ fontSize: 15, fontWeight: 700, color: "var(--iz-ink)" }}>{lastAnalysis.sight_guess || "Mangystau"}</p>
+            </div>
+            <Button size="sm" onClick={() => onNavigate("lens")}>{t("open")} <ArrowRight size={14} strokeWidth={2.4} /></Button>
+          </Card>
+        </motion.div>
+      )}
 
       {/* Featured destination */}
       <motion.div {...rise(0)}>

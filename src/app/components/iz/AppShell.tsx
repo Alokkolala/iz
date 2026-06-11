@@ -15,9 +15,9 @@ export function AppShell() {
       case "pulse":
         return <TouristPulse onNavigate={setTab} />;
       case "crew":
-        return <CrewMap />;
+        return <CrewMap onNavigate={setTab} />;
       case "lens":
-        return <ViralShotAssistant />;
+        return <ViralShotAssistant onNavigate={setTab} />;
       case "profile":
         return <ProfileMini />;
     }

@@ -6,6 +6,10 @@ import { Card, Button, IconChip, Overline } from "./ui";
 import { useI18n } from "./i18n";
 import { LangSwitcher } from "./LangSwitcher";
 import { useStore } from "./store";
+import { useAuth } from "../../../lib/AuthProvider";
+import { saveAnalysis } from "../../../lib/db";
+import { ProfileAvatar } from "./ProfileAvatar";
+import type { TabId } from "./types";
 
 const PREVIEW_IMG = "https://images.unsplash.com/photo-1547234935-80c7145ec969?auto=format&fit=crop&w=900&q=80";
 
@@ -41,15 +45,18 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-export function ViralShotAssistant() {
+export function ViralShotAssistant({ onNavigate }: { onNavigate: (t: TabId) => void }) {
   const { t, lang } = useI18n();
   const { addShot, shots } = useStore();
+  const { user } = useAuth();
   const [phase, setPhase] = useState<Phase>("idle");
   const [cat, setCat] = useState<Cat>("pose");
   const [photo, setPhoto] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [savingBusy, setSavingBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -60,12 +67,14 @@ export function ViralShotAssistant() {
     setPhase("idle");
     setAnalysis(null);
     setErrorMsg(null);
+    setSaved(false);
   };
 
   const generate = async () => {
     if (!photo) return;
     setPhase("scanning");
     setErrorMsg(null);
+    setSaved(false);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -83,6 +92,19 @@ export function ViralShotAssistant() {
     } catch (e: unknown) {
       setPhase("error");
       setErrorMsg(e instanceof Error ? e.message : "analysis failed");
+    }
+  };
+
+  const save = async () => {
+    if (!user || !analysis) return;
+    setSavingBusy(true);
+    try {
+      await saveAnalysis(user.id, analysis.sightGuess || "Mangystau", analysis);
+      setSaved(true);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSavingBusy(false);
     }
   };
 
@@ -123,7 +145,10 @@ export function ViralShotAssistant() {
           <Overline>{t("lens_kicker")}</Overline>
           <h1 className="font-display" style={{ fontSize: 26, fontWeight: 700, color: "var(--iz-ink)" }}>{t("lens_title")}</h1>
         </div>
-        <LangSwitcher />
+        <div className="flex items-center gap-2">
+          <LangSwitcher />
+          <ProfileAvatar onClick={() => onNavigate("profile")} />
+        </div>
       </div>
 
       <input ref={fileRef} type="file" accept="image/*" onChange={onPick} className="hidden" />
@@ -298,11 +323,21 @@ export function ViralShotAssistant() {
         )}
       </AnimatePresence>
 
-      <Button full onClick={generate} disabled={!photo || phase === "scanning"} className="py-4" style={{ fontSize: 15 }}>
-        {phase === "scanning" ? <><RefreshCw size={18} strokeWidth={2.3} className="animate-spin" /> {t("scanning_btn")}</>
-          : phase === "done" ? <><RefreshCw size={18} strokeWidth={2.3} /> {t("regenerate")}</>
-          : <><Sparkles size={18} strokeWidth={2.3} /> {t("generate")}</>}
-      </Button>
+      {phase === "done" && analysis ? (
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={save} disabled={savingBusy || saved || !user} className="flex-1 py-4" style={{ fontSize: 15 }}>
+            {saved ? <><Check size={18} strokeWidth={2.6} /> {t("saved")}</> : savingBusy ? "…" : <><Check size={18} strokeWidth={2.3} /> {t("save_shot")}</>}
+          </Button>
+          <Button onClick={generate} disabled={phase === "scanning"} className="flex-1 py-4" style={{ fontSize: 15 }}>
+            <RefreshCw size={18} strokeWidth={2.3} /> {t("regenerate")}
+          </Button>
+        </div>
+      ) : (
+        <Button full onClick={generate} disabled={!photo || phase === "scanning"} className="py-4" style={{ fontSize: 15 }}>
+          {phase === "scanning" ? <><RefreshCw size={18} strokeWidth={2.3} className="animate-spin" /> {t("scanning_btn")}</>
+            : <><Sparkles size={18} strokeWidth={2.3} /> {t("generate")}</>}
+        </Button>
+      )}
     </div>
   );
 }

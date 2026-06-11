@@ -5,6 +5,9 @@ import { Card, Button, IconChip, Overline } from "./ui";
 import { useI18n } from "./i18n";
 import { LangSwitcher } from "./LangSwitcher";
 import { useStore } from "./store";
+import { sendInvite } from "../../../lib/db";
+import { ProfileAvatar } from "./ProfileAvatar";
+import type { TabId } from "./types";
 
 const ease = [0.16, 1, 0.3, 1] as const;
 const springSheet = { type: "spring" as const, stiffness: 320, damping: 32 };
@@ -16,12 +19,14 @@ const distKm = (a: { x: number; y: number }, b: { x: number; y: number }) =>
 
 type Pos = { x: number; y: number };
 
-export function CrewMap() {
+export function CrewMap({ onNavigate }: { onNavigate: (t: TabId) => void }) {
   const { t } = useI18n();
   const { crew, addMember, removeMember, meetPoint, setMeetPoint } = useStore();
   const [selected, setSelected] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
   const [name, setName] = useState("");
   const [meetMode, setMeetMode] = useState(false);
   const [rallied, setRallied] = useState(false);
@@ -87,6 +92,18 @@ export function CrewMap() {
     addMember(name); setName(""); setAdding(false);
   };
 
+  const submitInvite = async () => {
+    const email = inviteEmail.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(email)) return;
+    try {
+      await sendInvite(email);
+      setInviteEmail(""); setInviting(false);
+      flash(t("invite_sent"));
+    } catch (e: any) {
+      flash(e?.message ?? "error");
+    }
+  };
+
   const toggleRally = () => {
     if (!meetPoint) { setMeetMode(true); return; }
     setRallied((r) => !r);
@@ -121,7 +138,10 @@ export function CrewMap() {
           <Overline>{t("crew_kicker")}</Overline>
           <h1 className="font-display" style={{ fontSize: 26, fontWeight: 700, color: "var(--iz-ink)" }}>{t("crew_title")}</h1>
         </div>
-        <div className="pointer-events-auto"><LangSwitcher /></div>
+        <div className="pointer-events-auto flex items-center gap-2">
+          <LangSwitcher />
+          <ProfileAvatar onClick={() => onNavigate("profile")} />
+        </div>
       </div>
 
       {/* banners */}
@@ -272,6 +292,19 @@ export function CrewMap() {
                   ) : (
                     <button key="addbtn" onClick={() => setAdding(true)} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 focus-visible:outline-none" style={{ background: crew.length === 0 ? "var(--iz-accent)" : "var(--iz-glass-bg-strong)", color: crew.length === 0 ? "var(--iz-on-accent)" : "var(--iz-ink-2)", border: crew.length === 0 ? "none" : "1px solid var(--iz-glass-border)", fontSize: 13, fontWeight: 600, boxShadow: crew.length === 0 ? "var(--iz-glow)" : "none" }}>
                       <span style={{ fontSize: 17, lineHeight: 1 }}>+</span> {t("add_friend")}
+                    </button>
+                  )}
+                </AnimatePresence>
+
+                <AnimatePresence mode="wait">
+                  {inviting ? (
+                    <motion.div key="invform" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="mt-2 flex gap-2 overflow-hidden">
+                      <input autoFocus type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitInvite()} placeholder={t("invitee_email")} className="flex-1 px-3.5 py-2.5 focus:outline-none" style={{ background: "var(--iz-surface-2)", border: "1px solid var(--iz-border)", borderRadius: "var(--iz-r-md)", color: "var(--iz-ink)", fontSize: 14 }} />
+                      <Button size="sm" onClick={submitInvite}><Check size={17} strokeWidth={2.6} /></Button>
+                    </motion.div>
+                  ) : (
+                    <button key="invbtn" onClick={() => setInviting(true)} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 focus-visible:outline-none" style={{ background: "var(--iz-glass-bg-strong)", color: "var(--iz-ink-2)", border: "1px solid var(--iz-glass-border)", fontSize: 13, fontWeight: 600 }}>
+                      <Users size={14} strokeWidth={2.2} /> {t("invite_by_email")}
                     </button>
                   )}
                 </AnimatePresence>

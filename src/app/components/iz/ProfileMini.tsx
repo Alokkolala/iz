@@ -1,22 +1,50 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { MapPin, Camera, Footprints, Camera as Cam, Check } from "./Icons";
+import { MapPin, Camera, Footprints, Camera as Cam, Check, Users, Navigation } from "./Icons";
 import { Card, Button, IconChip, Overline } from "./ui";
 import { useI18n } from "./i18n";
 import { LangSwitcher } from "./LangSwitcher";
 import { useStore, relativeTime } from "./store";
 import { useAuth } from "../../../lib/AuthProvider";
+import {
+  fetchProfile,
+  updateProfileName,
+  listIncomingInvites,
+  respondInvite,
+  deleteAccount,
+  type CrewInvite,
+} from "../../../lib/db";
 
 const ease = [0.16, 1, 0.3, 1] as const;
 
 export function ProfileMini() {
   const { t } = useI18n();
   const { name, setName, initialsOf, traces, shots, spots } = useStore();
-  const { user, signOut } = useAuth();
+  const { user, signOut, updatePassword } = useAuth();
+
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
 
-  const saveName = () => { setName(draft.trim()); setEditing(false); };
+  // Hydrate name from DB on mount; persist on save.
+  useEffect(() => {
+    let cancelled = false;
+    if (!user) return;
+    fetchProfile(user.id).then((p) => {
+      if (!cancelled && p?.name && !name) {
+        setName(p.name);
+        setDraft(p.name);
+      }
+    }).catch(() => { /* ignore — keep localStorage value */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  const saveName = async () => {
+    const v = draft.trim();
+    setName(v);
+    setEditing(false);
+    if (user) updateProfileName(user.id, v).catch(console.error);
+  };
 
   const stats = [
     { label: t("traces"), value: String(traces.length), Icon: Footprints },
@@ -27,6 +55,42 @@ export function ProfileMini() {
     { name: t("badge_creator"), Icon: Cam, earned: shots >= 3 },
   ];
   const badges = allBadges.filter((b) => b.earned);
+
+  // ---- Pending invites ----
+  const [invites, setInvites] = useState<CrewInvite[]>([]);
+  useEffect(() => {
+    if (!user?.email) return;
+    listIncomingInvites(user.email).then(setInvites).catch(console.error);
+  }, [user?.email]);
+  const handleInvite = async (id: string, status: "accepted" | "declined") => {
+    await respondInvite(id, status);
+    setInvites((xs) => xs.filter((i) => i.id !== id));
+  };
+
+  // ---- Password change ----
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pw, setPw] = useState("");
+  const [pwMsg, setPwMsg] = useState<string | null>(null);
+  const [pwBusy, setPwBusy] = useState(false);
+  const submitPw = async () => {
+    if (pw.length < 6) { setPwMsg(t("pw_too_short")); return; }
+    setPwBusy(true); setPwMsg(null);
+    const { error } = await updatePassword(pw);
+    setPwBusy(false);
+    if (error) { setPwMsg(error); return; }
+    setPw(""); setPwOpen(false); setPwMsg(t("pw_changed"));
+    setTimeout(() => setPwMsg(null), 2200);
+  };
+
+  // ---- Delete account ----
+  const [delConfirm, setDelConfirm] = useState(false);
+  const [delBusy, setDelBusy] = useState(false);
+  const [delErr, setDelErr] = useState<string | null>(null);
+  const doDelete = async () => {
+    setDelBusy(true); setDelErr(null);
+    try { await deleteAccount(); }
+    catch (e: any) { setDelErr(e?.message ?? "failed"); setDelBusy(false); }
+  };
 
   return (
     <div className="flex h-full flex-col gap-5 overflow-y-auto px-5 pb-28 pt-12">
@@ -76,6 +140,28 @@ export function ProfileMini() {
         ))}
       </div>
 
+      {/* Pending invites */}
+      {invites.length > 0 && (
+        <div>
+          <Overline className="mb-3">{t("pending_invites")}</Overline>
+          <Card className="divide-y divide-[var(--iz-border)] px-4">
+            {invites.map((inv) => (
+              <div key={inv.id} className="flex items-center gap-3 py-3">
+                <IconChip size={36}><Users size={17} strokeWidth={2} /></IconChip>
+                <div className="min-w-0 flex-1">
+                  <p style={{ fontSize: 14, fontWeight: 600, color: "var(--iz-ink)" }}>{t("invite_to_crew")}</p>
+                  <p className="truncate" style={{ fontSize: 12, color: "var(--iz-ink-3)" }}>
+                    {relativeTime(new Date(inv.created_at).getTime(), t("just_now"))}
+                  </p>
+                </div>
+                <Button size="sm" onClick={() => handleInvite(inv.id, "accepted")}>{t("accept")}</Button>
+                <Button size="sm" variant="ghost" onClick={() => handleInvite(inv.id, "declined")} style={{ color: "var(--iz-ink-3)" }}>{t("decline")}</Button>
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+
       {/* Earned badges */}
       <div>
         <Overline className="mb-3">{t("earned_badges")}</Overline>
@@ -112,14 +198,59 @@ export function ProfileMini() {
         )}
       </div>
 
-      {/* Sign out */}
-      <Button
-        variant="ghost"
-        onClick={signOut}
-        className="mt-2 w-full"
-        style={{ color: "var(--iz-ink-3)" }}
-      >
-        {t("sign_out")}
+      {/* Security */}
+      <div>
+        <Overline className="mb-3">{t("security")}</Overline>
+        {pwOpen ? (
+          <Card className="space-y-2 p-4">
+            <input
+              type="password"
+              autoFocus
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              placeholder={t("new_password")}
+              autoComplete="new-password"
+              minLength={6}
+              className="w-full px-3 py-2 focus:outline-none"
+              style={{ background: "var(--iz-surface-2)", border: "1px solid var(--iz-border)", borderRadius: "var(--iz-r-md)", color: "var(--iz-ink)", fontSize: 14 }}
+            />
+            {pwMsg && <p style={{ fontSize: 12, color: "var(--iz-ink-3)" }}>{pwMsg}</p>}
+            <div className="flex gap-2">
+              <Button size="sm" onClick={submitPw} disabled={pwBusy}>{pwBusy ? "…" : t("save")}</Button>
+              <Button size="sm" variant="ghost" onClick={() => { setPwOpen(false); setPw(""); setPwMsg(null); }} style={{ color: "var(--iz-ink-3)" }}>{t("cancel")}</Button>
+            </div>
+          </Card>
+        ) : (
+          <>
+            <Button variant="secondary" full onClick={() => setPwOpen(true)}>{t("change_password")}</Button>
+            {pwMsg && !pwOpen && <p className="mt-2 text-center" style={{ fontSize: 12, color: "var(--iz-accent)" }}>{pwMsg}</p>}
+          </>
+        )}
+      </div>
+
+      {/* Danger zone */}
+      <div>
+        <Overline className="mb-3">{t("danger_zone")}</Overline>
+        {delConfirm ? (
+          <Card className="space-y-3 p-4" style={{ borderColor: "rgba(255,90,90,0.4)" }}>
+            <p style={{ fontSize: 13, color: "var(--iz-ink-2)" }}>{t("delete_warning")}</p>
+            {delErr && <p style={{ fontSize: 12, color: "#ff7a7a" }}>{delErr}</p>}
+            <div className="flex gap-2">
+              <Button size="sm" onClick={doDelete} disabled={delBusy} style={{ background: "#c43a3a", color: "white" }}>
+                {delBusy ? "…" : t("delete_confirm")}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setDelConfirm(false); setDelErr(null); }} style={{ color: "var(--iz-ink-3)" }}>{t("cancel")}</Button>
+            </div>
+          </Card>
+        ) : (
+          <Button variant="ghost" full onClick={() => setDelConfirm(true)} style={{ color: "#ff7a7a" }}>
+            {t("delete_account")}
+          </Button>
+        )}
+      </div>
+
+      <Button variant="ghost" full onClick={signOut} className="mt-2" style={{ color: "var(--iz-ink-3)" }}>
+        <Navigation size={15} strokeWidth={2.2} /> {t("sign_out")}
       </Button>
     </div>
   );

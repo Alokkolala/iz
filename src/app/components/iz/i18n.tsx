@@ -182,6 +182,34 @@ export const STRINGS: Dict = {
 
   // auth
   sign_out: { en: "Sign out", ru: "Выйти", kk: "Шығу" },
+  security: { en: "Security", ru: "Безопасность", kk: "Қауіпсіздік" },
+  change_password: { en: "Change password", ru: "Сменить пароль", kk: "Құпиясөзді өзгерту" },
+  new_password: { en: "New password", ru: "Новый пароль", kk: "Жаңа құпиясөз" },
+  pw_too_short: { en: "Password must be at least 6 characters", ru: "Минимум 6 символов", kk: "Кемінде 6 таңба" },
+  pw_changed: { en: "Password updated", ru: "Пароль обновлён", kk: "Құпиясөз жаңартылды" },
+  danger_zone: { en: "Danger zone", ru: "Опасная зона", kk: "Қауіпті аймақ" },
+  delete_account: { en: "Delete account", ru: "Удалить аккаунт", kk: "Аккаунтты жою" },
+  delete_warning: { en: "This permanently deletes your account, saved photos, and crew invites. This can't be undone.", ru: "Это безвозвратно удалит ваш аккаунт, сохранённые кадры и приглашения. Действие нельзя отменить.", kk: "Бұл аккаунтыңыз бен сақталған кадрларды толығымен жояды. Қайтару мүмкін емес." },
+  delete_confirm: { en: "Yes, delete", ru: "Да, удалить", kk: "Иә, жою" },
+
+  // invites
+  invite_by_email: { en: "Invite by email", ru: "Пригласить по email", kk: "Email-мен шақыру" },
+  invitee_email: { en: "Friend's email", ru: "Email друга", kk: "Достың email" },
+  send_invite: { en: "Send invite", ru: "Отправить", kk: "Жіберу" },
+  invite_sent: { en: "Invite sent", ru: "Приглашение отправлено", kk: "Шақыру жіберілді" },
+  pending_invites: { en: "Pending invites", ru: "Входящие приглашения", kk: "Кіріс шақырулар" },
+  invite_to_crew: { en: "Invitation to join a crew", ru: "Приглашение в команду", kk: "Командаға шақыру" },
+  accept: { en: "Accept", ru: "Принять", kk: "Қабылдау" },
+  decline: { en: "Decline", ru: "Отклонить", kk: "Бас тарту" },
+
+  // lens save / history
+  save_shot: { en: "Save shot", ru: "Сохранить", kk: "Сақтау" },
+  saved: { en: "Saved", ru: "Сохранено", kk: "Сақталды" },
+  history: { en: "History", ru: "История", kk: "Тарих" },
+
+  // home continue
+  continue_card: { en: "Pick up where you left off", ru: "Продолжить с того места", kk: "Қалдырған жерден жалғастыру" },
+  open: { en: "Open", ru: "Открыть", kk: "Ашу" },
 };
 
 interface I18nCtx {
