@@ -3,15 +3,13 @@ export const config = {
   maxDuration: 30,
 }
 
-const LANG_NAME = { en: 'English', ru: 'Russian', kk: 'Kazakh' }
-
 /**
- * TTS via OpenRouter. Model: openai/gpt-4o-mini-tts (natural, multilingual,
- * auto-detects ~50 languages — good for ru/kk).
+ * TTS via OpenRouter. Model: hexgrad/kokoro-82m (cheap, fast, English-first).
+ * Default voice is `af_bella` (Kokoro voice naming: <lang><gender>_<name>).
  *
- * Buffers the full MP3 before responding — Vercel Functions don't reliably
- * stream a forwarded ReadableStream, and the buffered path is fast enough
- * for a few hundred KB.
+ * Note: OpenRouter's `/audio/speech` endpoint does not expose OpenAI's
+ * `gpt-4o-mini-tts` (model id 404s as of this writing). For OpenAI TTS we'd
+ * need an OPENAI_API_KEY and to call api.openai.com directly.
  */
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -19,19 +17,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'method not allowed' })
   }
   try {
-    const { text, lang, voice } = req.body ?? {}
+    const { text, voice } = req.body ?? {}
     if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'missing text' })
     }
-    const L = (lang === 'en' || lang === 'ru' || lang === 'kk') ? lang : 'ru'
-    const langName = LANG_NAME[L]
-    const voiceId = typeof voice === 'string' && voice ? voice : 'coral'
-
-    const instructions = `You are Iz — a friendly Mangystau travel guide having a real conversation with a friend on a road trip.
-Tone: warm, casual, low-key, like a close friend giving a tip — not a presenter or news anchor.
-Pace: relaxed and natural. Use small breaths and tiny pauses between thoughts.
-The text you are reading is written in ${langName}; speak it naturally in ${langName}.
-Do not add words, sound effects, or commentary — just read the text as if it were yours.`
+    const voiceId = typeof voice === 'string' && voice ? voice : 'af_bella'
 
     const referer = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
@@ -46,16 +36,10 @@ Do not add words, sound effects, or commentary — just read the text as if it w
         'X-Title': 'IZ Mangystau · Voice',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-4o-mini-tts',
+        model: 'hexgrad/kokoro-82m',
         input: text.slice(0, 3500),
         voice: voiceId,
         response_format: 'mp3',
-        speed: 1.02,
-        provider: {
-          options: {
-            openai: { instructions },
-          },
-        },
       }),
     })
 
