@@ -42,7 +42,7 @@ function fileToDataUrl(file: File): Promise<string> {
 }
 
 export function ViralShotAssistant() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { addShot, shots } = useStore();
   const [phase, setPhase] = useState<Phase>("idle");
   const [cat, setCat] = useState<Cat>("pose");
@@ -70,7 +70,7 @@ export function ViralShotAssistant() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ imageDataUrl: photo }),
+        body: JSON.stringify({ imageDataUrl: photo, lang }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "request failed" }));

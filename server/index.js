@@ -40,14 +40,20 @@ Mangystau region of Kazakhstan. Known sights:
 - Caspian Sea coast around Aktau.
 `
 
+const LANG_NAME = { en: 'English', ru: 'Russian', kk: 'Kazakh' }
+
 app.post('/api/analyze', async (req, res) => {
   try {
-    const { imageDataUrl } = req.body
+    const { imageDataUrl, lang } = req.body
     if (!imageDataUrl) return res.status(400).json({ error: 'missing imageDataUrl' })
+    const L = (lang === 'en' || lang === 'ru' || lang === 'kk') ? lang : 'ru'
+    const langName = LANG_NAME[L]
 
     const system = `You are a landscape and travel-reel photography coach for the Mangystau region.
 You critique the user's photo and direct a more viral version of the same shot.
 Be specific, concrete and kind. Use the photographer's vocabulary (composition, light, lens, pose).
+
+LANGUAGE: Respond entirely in ${langName}. Every "title", "detail", "bestTime", and "caption" string MUST be in ${langName}. Keep "sightGuess" as the proper place name (transliterate if needed). Hashtags stay latin-script.
 
 ${SIGHT_CONTEXT}
 
@@ -61,7 +67,7 @@ Respond with ONLY valid JSON, no prose, matching this shape exactly:
     "bestTime": "<e.g. 19:10–19:55 or 'first light, ~30 min before sunrise'>",
     "tips": [ { "title": "<short>", "detail": "<direction and quality of light>" }, ... 1-4 items ]
   },
-  "caption": "<one short, evocative Instagram caption in the same language as the user, lowercase, no hashtags>",
+  "caption": "<one short, evocative Instagram caption, lowercase, no hashtags>",
   "hashtags": ["#mangystau", "#kazakhstan", ... 4-10 items including the matched sight]
 }`
 
@@ -82,7 +88,7 @@ Respond with ONLY valid JSON, no prose, matching this shape exactly:
 
     const raw = completion.choices[0]?.message?.content ?? '{}'
     const parsed = Analysis.parse(JSON.parse(raw))
-    const references = pickReferences(parsed.sightGuess)
+    const references = pickReferences(parsed.sightGuess, L)
     res.json({ ...parsed, references })
   } catch (err) {
     console.error(err)
