@@ -125,6 +125,98 @@ function MapPinIcon({ size = 14 }: { size?: number }) {
   );
 }
 
+/**
+ * Dark-themed Leaflet mini-map with one numbered pin per place + a teal "you"
+ * dot for the origin. Auto-fits bounds. Replaces the old OSM ?marker= iframe
+ * which only supported a single huge pin and showed the "donate" footer.
+ */
+function MiniMap({
+  origin,
+  items,
+  emoji,
+}: {
+  origin: { lat: number; lon: number };
+  items: PlaceItem[];
+  emoji: string;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  // Stable JSON signature so the effect doesn't tear down the map every render.
+  const sig = JSON.stringify({
+    o: [origin.lat, origin.lon],
+    p: items.map((i) => [i.lat, i.lon, i.name]),
+  });
+
+  useEffect(() => {
+    let map: import("leaflet").Map | null = null;
+    let cancelled = false;
+    (async () => {
+      const L = await import("leaflet");
+      await import("leaflet/dist/leaflet.css");
+      if (cancelled || !ref.current) return;
+
+      map = L.map(ref.current, {
+        zoomControl: false,
+        attributionControl: false,
+        dragging: true,
+        scrollWheelZoom: false,
+        doubleClickZoom: true,
+        touchZoom: true,
+      });
+
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        subdomains: "abcd",
+        maxZoom: 19,
+        attribution: "", // attribution shown elsewhere
+      }).addTo(map);
+
+      // Origin = small teal pulsing dot for "you"
+      const youIcon = L.divIcon({
+        className: "iz-you-dot",
+        html: '<div style="width:14px;height:14px;border-radius:50%;background:#2dd4bf;border:2px solid rgba(255,255,255,0.95);box-shadow:0 0 0 4px rgba(45,212,191,0.25),0 2px 6px rgba(0,0,0,0.5);"></div>',
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+      });
+      L.marker([origin.lat, origin.lon], { icon: youIcon, interactive: false }).addTo(map);
+
+      // Each place = numbered emoji pin
+      items.forEach((p, i) => {
+        const pinHtml = `<div style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:#1f2937;border:2px solid #2dd4bf;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 4px 10px rgba(0,0,0,0.5);"><div style="transform:rotate(45deg);font-size:13px;font-weight:700;color:#fff;line-height:1;">${i + 1}</div></div>`;
+        const icon = L.divIcon({
+          className: "iz-place-pin",
+          html: pinHtml,
+          iconSize: [32, 32],
+          iconAnchor: [16, 30],
+        });
+        const m = L.marker([p.lat, p.lon], { icon }).addTo(map!);
+        m.bindTooltip(
+          `<div style="font-size:12px;font-weight:600;color:#fff;">${i + 1}. ${p.name}</div><div style="font-size:11px;color:#cbd5e1;">${p.distance_km < 1 ? Math.round(p.distance_km * 1000) + " m" : p.distance_km + " km"}</div>`,
+          { direction: "top", offset: [0, -28], opacity: 0.95 },
+        );
+      });
+
+      // Fit to all points
+      if (items.length) {
+        const bounds = L.latLngBounds([
+          [origin.lat, origin.lon],
+          ...items.map((p) => [p.lat, p.lon] as [number, number]),
+        ]);
+        map.fitBounds(bounds, { padding: [24, 24], maxZoom: 15 });
+      } else {
+        map.setView([origin.lat, origin.lon], 13);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (map) {
+        map.remove();
+        map = null;
+      }
+    };
+  }, [sig, emoji, origin.lat, origin.lon, items]);
+
+  return <div ref={ref} style={{ width: "100%", height: 180, background: "#0b1220" }} />;
+}
+
 function PlacesCard({
   action,
   labelOpen,
@@ -147,32 +239,40 @@ function PlacesCard({
         WebkitBackdropFilter: "blur(14px)",
       }}
     >
-      {/* live OSM map — free, no key, fully interactive (drag/zoom) */}
-      <div style={{ position: "relative", width: "100%", height: 160, background: "rgba(0,0,0,0.25)" }}>
-        <iframe
-          title={`Map of ${action.category}`}
-          src={action.embedUrl}
-          style={{ width: "100%", height: "100%", border: 0, display: "block" }}
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-        />
+      {/* Dark Leaflet mini-map with all pins on it */}
+      <div style={{ position: "relative", width: "100%" }}>
+        <MiniMap origin={action.origin} items={action.items} emoji={emoji} />
         <a
           href={action.listUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1"
           style={{
-            background: "rgba(8,30,52,0.78)",
+            background: "rgba(8,30,52,0.85)",
             color: "#fff",
             fontSize: 11,
             fontWeight: 600,
             textDecoration: "none",
             border: "1px solid rgba(255,255,255,0.18)",
+            zIndex: 400,
           }}
         >
           <MapPinIcon size={11} />
           {labelOpenAll}
         </a>
+        <div
+          style={{
+            position: "absolute",
+            left: 6,
+            bottom: 4,
+            fontSize: 9,
+            color: "rgba(255,255,255,0.45)",
+            zIndex: 400,
+            pointerEvents: "none",
+          }}
+        >
+          © OSM · CARTO
+        </div>
       </div>
 
       {/* list of places */}
@@ -198,8 +298,24 @@ function PlacesCard({
                 textDecoration: "none",
               }}
             >
-              <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden>
-                {emoji}
+              <span
+                aria-hidden
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  background: "rgba(45,212,191,0.15)",
+                  border: "1px solid rgba(45,212,191,0.5)",
+                  color: "#5eead4",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {i + 1}
               </span>
               <div className="min-w-0 flex-1">
                 <div
