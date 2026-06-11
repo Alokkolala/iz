@@ -4,13 +4,35 @@ export const config = {
 }
 
 /**
- * TTS via OpenRouter. Model: hexgrad/kokoro-82m (cheap, fast, English-first).
- * Default voice is `af_bella` (Kokoro voice naming: <lang><gender>_<name>).
+ * TTS via OpenRouter `/audio/speech`.
  *
- * Note: OpenRouter's `/audio/speech` endpoint does not expose OpenAI's
- * `gpt-4o-mini-tts` (model id 404s as of this writing). For OpenAI TTS we'd
- * need an OPENAI_API_KEY and to call api.openai.com directly.
+ * Primary:  x-ai/grok-voice-tts-1.0
+ * Fallback: hexgrad/kokoro-82m  (kicks in if grok upstream errors — it does
+ *           today, but the model is in OpenRouter's catalog so it'll start
+ *           working as soon as xAI rolls it out, no code change needed).
+ *
+ * Buffers the full MP3 before responding — Vercel Functions don't reliably
+ * pipe a forwarded ReadableStream, and these payloads are small enough that
+ * buffering is the faster end-to-end path.
  */
+async function speak({ model, voice, input, referer }) {
+  return fetch('https://openrouter.ai/api/v1/audio/speech', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': referer,
+      'X-Title': 'IZ Mangystau · Voice',
+    },
+    body: JSON.stringify({
+      model,
+      input: input.slice(0, 3500),
+      voice,
+      response_format: 'mp3',
+    }),
+  })
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST')
@@ -21,31 +43,35 @@ export default async function handler(req, res) {
     if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'missing text' })
     }
-    const voiceId = typeof voice === 'string' && voice ? voice : 'af_bella'
-
     const referer = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : 'http://localhost:5173'
 
-    const r = await fetch('https://openrouter.ai/api/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': referer,
-        'X-Title': 'IZ Mangystau · Voice',
-      },
-      body: JSON.stringify({
-        model: 'hexgrad/kokoro-82m',
-        input: text.slice(0, 3500),
-        voice: voiceId,
-        response_format: 'mp3',
-      }),
+    // 1) try Grok TTS with caller-provided voice or `alloy`
+    let r = await speak({
+      model: 'x-ai/grok-voice-tts-1.0',
+      voice: typeof voice === 'string' && voice ? voice : 'alloy',
+      input: text,
+      referer,
     })
+    let usedModel = 'x-ai/grok-voice-tts-1.0'
+
+    // 2) on any upstream error, fall back to Kokoro with a Kokoro-native voice
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '')
+      console.warn('grok tts failed, falling back to kokoro', r.status, detail)
+      r = await speak({
+        model: 'hexgrad/kokoro-82m',
+        voice: 'af_bella',
+        input: text,
+        referer,
+      })
+      usedModel = 'hexgrad/kokoro-82m'
+    }
 
     if (!r.ok) {
       const detail = await r.text().catch(() => '')
-      console.error('tts upstream error', r.status, detail)
+      console.error('tts upstream error (both models)', r.status, detail)
       return res.status(502).json({ error: 'tts upstream', status: r.status, detail })
     }
 
@@ -53,6 +79,7 @@ export default async function handler(req, res) {
     res.setHeader('Content-Type', 'audio/mpeg')
     res.setHeader('Cache-Control', 'no-store')
     res.setHeader('Content-Length', String(buf.length))
+    res.setHeader('X-TTS-Model', usedModel)
     res.end(buf)
   } catch (err) {
     console.error(err)
