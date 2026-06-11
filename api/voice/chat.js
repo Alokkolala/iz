@@ -489,6 +489,12 @@ async function applyIntent(intent, location, L) {
 }
 
 const GREETING_RE = /^\s*(?:(?:привет|здравствуй|здарова|здорово|hi|hey|hello|hola|салам|сәлем|salem|капля|kaplya|капелька|iz|из|йо|yo)[\s!.,?]*){1,3}$/i
+
+// CURRENT_INFO_RE — turns where the model should NOT guess from memory but
+// consult live web search. Matches things like "самый новый", "цены сейчас",
+// "что открыто", "newest", "today", "prices", "news", "hours", "right now".
+// When this fires we swap the model id to its :online variant for ONE turn.
+const CURRENT_INFO_RE = /(сам(?:ый|ая|ое|ые)\s+нов|нов(?:ый|ая|ое|ые)\s+(?:тц|молл|ресторан|кафе|отел|hotel|mall|restaurant)|цен[аы]\s*сейчас|сколько\s+стоит|расписани|часы\s+работы|открыт(?:о|ы)?\s+(?:ли|сейчас)|работа(?:ет|ют)?\s+(?:ли|сейчас)|новост|сегодня\s+(?:открыт|работа|событ)|афиш|курс\s+(?:доллар|евро|тенге|kzt|usd|eur)|newest|brand\s*new|opening\s+hours|open\s+(?:now|today)|prices?\s+(?:now|today)|exchange\s+rate|whats?\s+on\s+(?:today|tonight)|news|жаңа\s+ашыл|бүгін\s+ашық|бағас)/i
 const GREETINGS = {
   en: [
     "Hey — I'm Iz. I know Mangystau cold: canyons, salt flats, weird stone balls. What do you want to see?",
@@ -613,13 +619,13 @@ export default async function handler(req, res) {
 
     const system = `You are Iz — a Mangystau local who knows the region cold. You're texting a traveler, not writing a brochure.
 
-VOICE RULES (these are absolute):
+VOICE RULES (these are absolute — they're for SPOKEN, not written, replies):
 - Reply in ${langName}.
 - Maximum TWO short sentences. Aim for one. Never three.
+- Sound spoken, not written. Use contractions, em-dashes, commas, light "ah", "ну", "look", "слушай" — whatever lets a TTS engine breathe. Avoid stiff connectors like "furthermore", "однако", "таким образом".
 - No emojis. No markdown. No bullet points. No URLs. No bracketed citations like "[domain.com]". No site names.
-- Use contractions and warm, casual phrasing. Match the traveler's energy.
 - NEVER explain what a word means in general. Assume they're a tourist in Mangystau asking about Mangystau.
-- If you genuinely don't know, say so in one sentence — don't invent.
+- If you genuinely don't know, say so in one sentence — don't invent place names, malls, hotels, or businesses. Saying "не знаю точно" is fine; making up "Аktau City Mall" is not.
 - ${locLine}
 
 CARDS DO THE SHOWING. You only narrate; the app renders the rich card. End your reply with EXACTLY ONE marker (or none). Markers are invisible stage directions — never read them aloud, never mention them, never list place names if you're using a card marker.
@@ -660,9 +666,20 @@ ${SIGHT_CONTEXT}`
           .map((m) => ({ role: m.role, content: String(m.content).slice(0, 1200) }))
       : []
 
+    // If the user asked for current/live info (newest mall, prices, hours,
+    // news), swap to the :online variant for this turn so Gemini actually
+    // searches the web instead of hallucinating place names like "Aktau City".
+    const needsWeb = CURRENT_INFO_RE.test(String(lastUser || ''))
+    const modelId = needsWeb
+      ? 'google/gemini-2.5-flash-lite:online'
+      : 'google/gemini-2.5-flash-lite'
+    const webNote = needsWeb
+      ? `\n\nTHIS TURN HAS WEB SEARCH. The user is asking for current info you can only know from the web. Use the search results, then answer in ONE short sentence. Never paste URLs, domains, or source names. If results are thin, say so plainly.`
+      : ''
+
     const completion = await client.chat.completions.create({
-      model: 'google/gemini-2.5-flash-lite',
-      messages: [{ role: 'system', content: system }, ...history],
+      model: modelId,
+      messages: [{ role: 'system', content: system + webNote }, ...history],
       max_tokens: 220,
       temperature: 0.6,
     })
