@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { useI18n, type Lang } from "./i18n";
 import { X } from "./Icons";
 import { Stone3D } from "./Stone3D";
+import { useAuth } from "../../../lib/AuthProvider";
 
 const VoiceSphere = lazy(() => import("./VoiceSphere"));
 
@@ -65,7 +66,13 @@ type WeatherAction = {
   sunset: string | null;
   tomorrow: { maxC: number; minC: number; label: string };
 };
-type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction;
+type PlanAction = {
+  kind: "plan";
+  mood: string | null;
+  origin: { lat: number; lon: number };
+  blocks: { label: "sight" | "food" | "view"; items: Array<{ name?: string; tip?: string }> }[];
+};
+type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction | PlanAction;
 type Msg = {
   role: "user" | "assistant";
   text: string;
@@ -573,6 +580,55 @@ function DirectionsCard({
   );
 }
 
+function PlanCard({ action }: { action: PlanAction }) {
+  return (
+    <div
+      className="mt-2 w-full max-w-[320px] overflow-hidden rounded-2xl px-3 py-3"
+      style={{
+        background: "rgba(255,255,255,0.08)",
+        border: "1px solid rgba(255,255,255,0.16)",
+        backdropFilter: "blur(14px)",
+        WebkitBackdropFilter: "blur(14px)",
+      }}
+    >
+      <div className="flex flex-col gap-3">
+        {action.blocks.map((block) => (
+          <div key={block.label}>
+            <div
+              className="mb-1 uppercase"
+              style={{
+                fontSize: 10,
+                letterSpacing: "0.12em",
+                color: "rgba(94,234,212,0.86)",
+                fontWeight: 700,
+              }}
+            >
+              {block.label}
+            </div>
+            <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+              {block.items.map((item, i) => (
+                <div
+                  key={`${block.label}-${i}`}
+                  className="min-w-[140px] rounded-xl px-2.5 py-2"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    color: "#fff",
+                    fontSize: 12,
+                    lineHeight: 1.35,
+                  }}
+                >
+                  {item.name || item.tip || "Mangystau"}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Bubble({
   msg,
   isLast,
@@ -677,6 +733,7 @@ function Bubble({
             labelSunset={labelSunset}
           />
         )}
+        {msg.action?.kind === "plan" && <PlanCard action={msg.action} />}
         {isLast && msg.suggestions && msg.suggestions.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {msg.suggestions.map((s, i) => (
@@ -748,6 +805,7 @@ interface VoiceChatProps {
 
 export function VoiceChat({ onClose }: VoiceChatProps) {
   const { lang, t } = useI18n();
+  const { user } = useAuth();
   const [status, setStatus] = useState<Status>("idle");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -847,7 +905,7 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, []);
+  }, [user?.id]);
 
   // ---- cleanup on unmount ----------------------------------------------
   useEffect(() => {
@@ -1024,6 +1082,7 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
           lang: langRef.current,
           location: locationRef.current,
           lastAction: lastAssistantAction,
+          userId: user?.id ?? null,
         }),
       });
       if (!res.ok) throw new Error("network");
@@ -1087,6 +1146,21 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
             minC: Number(a.tomorrow?.minC ?? 0),
             label: String(a.tomorrow?.label ?? ""),
           },
+        };
+      } else if (a && a.kind === "plan" && Array.isArray(a.blocks)) {
+        action = {
+          kind: "plan",
+          mood: typeof a.mood === "string" ? a.mood : null,
+          origin: a.origin ?? { lat: 0, lon: 0 },
+          blocks: a.blocks
+            .filter((b: any) => b && Array.isArray(b.items))
+            .map((b: any) => ({
+              label: b.label === "food" || b.label === "view" ? b.label : "sight",
+              items: b.items.map((it: any) => ({
+                name: it?.name ? String(it.name) : undefined,
+                tip: it?.tip ? String(it.tip) : undefined,
+              })),
+            })),
         };
       }
       const suggestions: string[] = Array.isArray(data?.suggestions)

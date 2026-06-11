@@ -1,35 +1,4 @@
-import express from 'express'
-import OpenAI from 'openai'
-import { z } from 'zod'
-import { pickReferences } from './references.js'
-import { handleVoiceChat } from './shared/voice.js'
-
-const app = express()
-app.use(express.json({ limit: '15mb' }))
-
-const client = new OpenAI({
-  apiKey: process.env.OPENROUTER_API_KEY || 'missing-openrouter-key',
-  baseURL: 'https://openrouter.ai/api/v1',
-  defaultHeaders: {
-    'HTTP-Referer': 'http://localhost:5173',
-    'X-Title': 'IZ Mangystau · Lens',
-  },
-})
-
-const Tip = z.object({ title: z.string(), detail: z.string() })
-
-const Analysis = z.object({
-  sightGuess: z.string(),
-  confidence: z.number().min(0).max(1),
-  pose: z.array(Tip).min(1).max(4),
-  angle: z.array(Tip).min(1).max(4),
-  light: z.object({
-    bestTime: z.string(),
-    tips: z.array(Tip).min(1).max(4),
-  }),
-  caption: z.string(),
-  hashtags: z.array(z.string()).min(4).max(10),
-})
+import { pickReferences } from '../references.js'
 
 const SIGHT_CONTEXT = `
 Mangystau region of Kazakhstan. Known sights:
@@ -43,65 +12,6 @@ Mangystau region of Kazakhstan. Known sights:
 
 const LANG_NAME = { en: 'English', ru: 'Russian', kk: 'Kazakh' }
 
-app.post('/api/analyze', async (req, res) => {
-  try {
-    const { imageDataUrl, lang } = req.body
-    if (!imageDataUrl) return res.status(400).json({ error: 'missing imageDataUrl' })
-    const L = (lang === 'en' || lang === 'ru' || lang === 'kk') ? lang : 'ru'
-    const langName = LANG_NAME[L]
-
-    const system = `You are a landscape and travel-reel photography coach for the Mangystau region.
-You critique the user's photo and direct a more viral version of the same shot.
-Be specific, concrete and kind. Use the photographer's vocabulary (composition, light, lens, pose).
-
-LANGUAGE: Respond entirely in ${langName}. Every "title", "detail", "bestTime", and "caption" string MUST be in ${langName}. Keep "sightGuess" as the proper place name (transliterate if needed). Hashtags stay latin-script.
-
-${SIGHT_CONTEXT}
-
-Respond with ONLY valid JSON, no prose, matching this shape exactly:
-{
-  "sightGuess": "<best guess at the Mangystau location, or 'Mangystau' if unsure>",
-  "confidence": <number 0..1>,
-  "pose": [ { "title": "<short>", "detail": "<one concrete instruction>" }, ... 1-4 items ],
-  "angle": [ { "title": "<short>", "detail": "<lens, framing, height>" }, ... 1-4 items ],
-  "light": {
-    "bestTime": "<e.g. 19:10–19:55 or 'first light, ~30 min before sunrise'>",
-    "tips": [ { "title": "<short>", "detail": "<direction and quality of light>" }, ... 1-4 items ]
-  },
-  "caption": "<one short, evocative Instagram caption, lowercase, no hashtags>",
-  "hashtags": ["#mangystau", "#kazakhstan", ... 4-10 items including the matched sight]
-}`
-
-    const completion = await client.chat.completions.create({
-      model: 'google/gemini-2.5-flash-lite',
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: system },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'Critique this photo and direct a more viral version. Reply with the JSON only.' },
-            { type: 'image_url', image_url: { url: imageDataUrl } },
-          ],
-        },
-      ],
-    })
-
-    const raw = completion.choices[0]?.message?.content ?? '{}'
-    const parsed = Analysis.parse(JSON.parse(raw))
-    const references = pickReferences(parsed.sightGuess, L)
-    res.json({ ...parsed, references })
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: err?.message ?? 'analysis failed' })
-  }
-})
-
-/**
- * OpenStreetMap "amenity/tourism/shop" tags Iz is allowed to ask for.
- * Mapping covers the natural categories a traveler asks about. Anything not
- * in the table falls back to "tourist_attraction".
- */
 const OSM_TAGS = {
   cafe: ['amenity', 'cafe'],
   restaurant: ['amenity', 'restaurant'],
@@ -126,8 +36,6 @@ const OSM_TAGS = {
   beach: ['natural', 'beach'],
 }
 
-// Super-categories: union of several OSM tags for vague queries like
-// "what's there to do" / "куда сходить" — returns mixed POIs.
 const OSM_UNIONS = {
   things_to_do: [
     ['tourism', 'attraction'],
@@ -159,13 +67,6 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.asin(Math.sqrt(a))
 }
 
-/**
- * Hit the public Overpass endpoint for real OSM POIs around (lat, lon).
- * Tries 5 km first, expands to 20 km if nothing comes back — Mangystau is
- * sparse. Returns at most 8 nearest, sorted by haversine distance.
- */
-// Public Overpass returns 406 without a User-Agent. Three mirrors so a single
-// node going down doesn't kill the agent.
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
@@ -229,7 +130,6 @@ async function searchOSMPlaces(category, lat, lon) {
         t.brand ||
         t.operator ||
         (t.amenity || t.shop || t.tourism || t.leisure || category).replace(/_/g, ' ')
-      // Capitalise lowercase OSM-tag fallback ("supermarket" → "Supermarket").
       if (name && name === name.toLowerCase()) {
         name = name.charAt(0).toUpperCase() + name.slice(1)
       }
@@ -243,8 +143,6 @@ async function searchOSMPlaces(category, lat, lon) {
     })
     .filter(Boolean)
     .sort((a, b) => a.distance_km - b.distance_km)
-  // Dedupe: drop entries with the same name within 80 m of each other
-  // (Overpass often returns both the node and the building's way for one POI).
   const seen = []
   const items = rawItems
     .filter((p) => {
@@ -264,11 +162,6 @@ async function searchOSMPlaces(category, lat, lon) {
   return items
 }
 
-/**
- * Builds a bbox tight enough to show the user + every found place. Uses the
- * OSM public embed (no key required) — a real interactive map that pans /
- * zooms inside the chat bubble.
- */
 function buildOSMEmbed(lat, lon, items) {
   const lats = [lat, ...items.map((p) => p.lat)]
   const lons = [lon, ...items.map((p) => p.lon)]
@@ -280,10 +173,6 @@ function buildOSMEmbed(lat, lon, items) {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${minLon}%2C${minLat}%2C${maxLon}%2C${maxLat}&layer=mapnik&marker=${lat}%2C${lon}`
 }
 
-/**
- * Open-Meteo current weather + 2-day forecast for the user's coords.
- * Free, no key. Returns a compact, frontend-renderable object.
- */
 const WEATHER_LABEL = {
   0:  { en: 'Clear', ru: 'Ясно', kk: 'Ашық' },
   1:  { en: 'Mostly clear', ru: 'В осн. ясно', kk: 'Негізінен ашық' },
@@ -338,44 +227,31 @@ async function fetchWeather(lat, lon, L) {
   }
 }
 
-/**
- * Strip every shape of garbage the LLM might leak into the spoken reply —
- * markdown citations, bare URLs, brand-name brackets, bold/italics, bullets,
- * and any leftover [[…]] stage directions. What's left is clean prose safe
- * to render in the bubble AND send to TTS.
- */
 function scrubReply(s) {
   if (!s) return ''
   return s
-    .replace(/\[\[[^\]]+\]\]/g, '')                              // leftover stage directions
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')                        // images
-    .replace(/\[([^\]]+)\]\((?:https?:[^)]+|\/[^)]+)\)/g, '$1')  // [text](url) -> text
-    .replace(/\[(?:[a-z0-9.\-]+\.[a-z]{2,}(?:\/[^\]]*)?)\]/gi, '') // [domain.com/…]
-    .replace(/\bhttps?:\/\/\S+/g, '')                            // bare URLs
+    .replace(/\[\[[^\]]+\]\]/g, '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\((?:https?:[^)]+|\/[^)]+)\)/g, '$1')
+    .replace(/\[(?:[a-z0-9.\-]+\.[a-z]{2,}(?:\/[^\]]*)?)\]/gi, '')
+    .replace(/\bhttps?:\/\/\S+/g, '')
     .replace(/\bwww\.\S+/g, '')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')                           // **bold**
-    .replace(/(^|[\s])\*([^*\n]+)\*/g, '$1$2')                   // *italic*
-    .replace(/^\s*[-*•]\s+/gm, '')                               // list bullets
-    .replace(/^#{1,6}\s+/gm, '')                                 // headings
-    .replace(/`([^`]+)`/g, '$1')                                 // inline code
-    .replace(/\s+([.,!?;:])/g, '$1')                             // space before punct
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/(^|[\s])\*([^*\n]+)\*/g, '$1$2')
+    .replace(/^\s*[-*•]\s+/gm, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\s+([.,!?;:])/g, '$1')
     .replace(/\s{2,}/g, ' ')
     .trim()
 }
 
-/**
- * Strips ALL markers ([[GO:…]], [[NEAR:…]], [[SIGHT:…]], [[WEATHER]],
- * [[SUGG:…]]) from the model reply, calls the relevant data source, and
- * returns a structured action + suggestion list the frontend renders. The
- * markers are never spoken — they're stage directions to the app.
- */
 async function extractActions(text, location, L) {
   if (!text) return { clean: '', action: null, suggestions: [] }
   let clean = text
   let action = null
   let suggestions = []
 
-  // SUGG marker — three tappable chip texts pipe-separated
   const sugg = clean.match(/\[\[SUGG:\s*([^\]]+?)\s*\]\]/i)
   if (sugg) {
     clean = clean.replace(sugg[0], '').trim()
@@ -448,20 +324,6 @@ async function extractActions(text, location, L) {
   return { clean: scrubReply(clean), action, suggestions }
 }
 
-/**
- * Pre-canned warm openers + suggestion chips for "hi" / "hey" / "капля" / "iz".
- * Bypasses the LLM entirely — instant, free, on-brand, never tries to
- * search the web for kindergarten lesson plans about water droplets.
- */
-/**
- * Deterministic intent classifier — Gemini-Flash-Lite is too small to route
- * markers reliably, so we run regexes on the user's last message and force
- * the action server-side. The model's text reply still flows through; we
- * just override which card shows up next to it.
- *
- * Order matters: GO (specific route) > SIGHT (named landmark) > WEATHER >
- * NEAR (around me). Returns { kind, payload } or null.
- */
 const SIGHT_KEYWORDS = [
   { bucket: 'bozzhyra', needles: /бозжыр|бозжир|bozzhyra|bozzhira|boszhira|bozjyra|клык|fangs/i },
   { bucket: 'sherkala', needles: /шерқал|шеркал|sherkala|sherqala|shirkala|lion mountain/i },
@@ -495,34 +357,23 @@ const NEAR_KEYWORDS = [
   { cat: 'food',         needles: /покушать|перекус|перекусить|где едят/i },
   { cat: 'shopping',     needles: /шопинг|шоппинг|купить|shopping/i },
 ]
-// NOTE: \b only handles Latin word boundaries in JS regex; for Cyrillic we
-// match substrings directly (the keywords are specific enough to avoid
-// false positives).
 const WEATHER_RE = /погод|прогноз|ауа рай|\bweather\b|\bforecast\b|температур|жарко|холодно|will it rain|дожд|ветер|снег|\bwind\b|sunrise|sunset|закат|восход/i
 const NEAR_GENERIC_RE = /(что|where).{0,8}(рядом|вокруг|around|near|nearby|close to me|поблизости|near me)/i
 const GO_RE = /(take me to|route to|поехали в|как добраться до|проложи маршрут|маршрут до|маршрут для до|drive me to|navigate to|проводи меня|проводи до)/i
 const NEAREST_RE = /(ближайш|nearest|closest|самый близкий|самой близкой)/i
 const RECALL_RE = /(ту точк|эту точк|что (?:ты )?показал|показал.{0,12}карт|что это (?:был[оа]|за)|where did you|that map|that pin|that point|тот пин|та метк)/i
-// "Скажи мне X" / "Найди X" / "Самый новый X" — any of these turns a category
-// keyword into a clear NEAR intent even without "рядом/где".
 const NEAR_VERB_RE = /(скажи|найди|поищ|посовет|покажи мне|подскажи|есть ли|какие|какой|какая|какое|самый|самая|самое|самые|лучш|новейш|tell me|find me?|show me|which|what(?:'s| is) the|recommend|nearest|best|newest)/i
-// Superlatives we can't actually rank for — we still show closest, but the
-// narration will say so honestly.
 const SUPERLATIVE_RE = /(самый|самая|самое|самые|лучш|новейш|новая|новый|новое|новые|best|newest|nicest|fanciest|cheapest|самый дешёв|самый дорог)/i
 
 function classifyIntent(userText) {
   if (!userText) return null
   const s = String(userText).trim()
   if (!s) return null
-  // 0. RECALL — user is asking about the previous card. No fresh action; the
-  //    handler will inject memory into the prompt and let the model answer.
   if (RECALL_RE.test(s)) return { kind: 'recall' }
-  // 1. GO — explicit "take me to X"
   const go = s.match(GO_RE)
   if (go) {
     const after = s.slice(go.index + go[0].length).replace(/[?!.,]+$/, '').trim()
     if (after) {
-      // 1a. Compound: "route to nearest <category>" → search then directions
       if (NEAREST_RE.test(after) || NEAREST_RE.test(s)) {
         for (const { cat, needles } of NEAR_KEYWORDS) {
           if (needles.test(after) || needles.test(s)) {
@@ -530,26 +381,21 @@ function classifyIntent(userText) {
           }
         }
       }
-      // 1b. Compound: "route to <known sight>"
       for (const { bucket, needles } of SIGHT_KEYWORDS) {
         if (needles.test(after)) return { kind: 'go_sight', bucket, destination: after }
       }
       return { kind: 'go', destination: after }
     }
   }
-  // 2. NEAREST without GO — "where's the nearest ATM" → near (will sort by distance)
   if (NEAREST_RE.test(s)) {
     for (const { cat, needles } of NEAR_KEYWORDS) {
       if (needles.test(s)) return { kind: 'near', category: cat }
     }
   }
-  // 3. SIGHT — explicit landmark mention
   for (const { bucket, needles } of SIGHT_KEYWORDS) {
     if (needles.test(s)) return { kind: 'sight', bucket }
   }
-  // 4. WEATHER — explicit weather words
   if (WEATHER_RE.test(s)) return { kind: 'weather' }
-  // 5. NEAR — "what's around" generic, or a NEAR category keyword
   if (NEAR_GENERIC_RE.test(s)) {
     for (const { cat, needles } of NEAR_KEYWORDS) {
       if (needles.test(s)) return { kind: 'near', category: cat }
@@ -557,7 +403,6 @@ function classifyIntent(userText) {
     return { kind: 'near', category: 'things_to_do' }
   }
   for (const { cat, needles } of NEAR_KEYWORDS) {
-    // category keyword + either a locative hint OR a search verb / superlative
     if (
       needles.test(s) &&
       (/рядом|вокруг|around|near|поблизост|закрыт|открыт|где|where/i.test(s) ||
@@ -615,11 +460,9 @@ async function applyIntent(intent, location, L) {
     return { kind: 'directions', destination: intent.bucket, url, photos }
   }
   if (intent.kind === 'go_nearest' && location) {
-    // Compound: search → pick closest with coords → build directions URL
     const items = await searchOSMPlaces(intent.category, location.lat, location.lon)
     const target = items[0]
     if (!target) {
-      // Fallback: just open Google Maps search for the category.
       const listUrl = `https://www.google.com/maps/search/${encodeURIComponent(intent.category)}/@${location.lat},${location.lon},13z`
       return { kind: 'directions', destination: intent.category, url: listUrl, missing: true }
     }
@@ -632,11 +475,9 @@ async function applyIntent(intent, location, L) {
       target: { name: target.name, lat: target.lat, lon: target.lon, distance_km: target.distance_km },
     }
   }
-  // RECALL doesn't trigger a new action — handled via memory in the system prompt.
   return null
 }
 
-// Allow up to 3 greeting tokens in a row (e.g. "Привет капля", "Hi Iz!", "Hey hey hello").
 const GREETING_RE = /^\s*(?:(?:привет|здравствуй|здарова|здорово|hi|hey|hello|hola|салам|сәлем|salem|капля|kaplya|капелька|iz|из|йо|yo)[\s!.,?]*){1,3}$/i
 
 // CURRENT_INFO_RE — turns where the model should NOT guess from memory but
@@ -667,11 +508,6 @@ const GREETING_SUGGS = {
   kk: ["Жақын маңда не бар?", "Бозжыраны көрсет", "Бүгінгі ауа райы"],
 }
 
-/**
- * Build a one-line summary of the last card the app rendered, so the LLM has
- * memory of its own actions and can answer "what was that point on the map?"
- * without denying it ever showed anything.
- */
 function summarizeLastAction(a) {
   if (!a || typeof a !== 'object') return null
   if (a.kind === 'weather') {
@@ -690,12 +526,6 @@ function summarizeLastAction(a) {
   return null
 }
 
-/**
- * For DETERMINISTIC compound intents (go_nearest, near with results), template
- * the narration so it actually matches what the card shows. Avoids the LLM's
- * "I don't know" denials when the classifier already found the answer.
- * Returns null if no override needed → LLM's own text is kept.
- */
 function narrateForcedAction(intent, action, L) {
   if (!intent || !action) return null
   if (intent.kind === 'go_nearest') {
@@ -725,7 +555,6 @@ function narrateForcedAction(intent, action, L) {
     }
     const closest = action.items[0]
     if (intent.superlative) {
-      // We can't actually rank by "newest" / "best" — admit it, show closest.
       return {
         en: `Can't filter by newest from the map, but the closest ${n} are here — ${closest.name} is just ${closest.distance_km} km away.`,
         ru: `По "самым новым" не отсортирую, но вот ближайшие ${n} — ${closest.name} всего в ${closest.distance_km} км.`,
@@ -741,97 +570,20 @@ function narrateForcedAction(intent, action, L) {
   return null
 }
 
-app.post('/api/voice/chat', handleVoiceChat)
 
-/**
- * TTS via OpenRouter `/audio/speech`.
- *
- * Voice consistency: pin Gemini "Kore" only. The old Kokoro fallback (af_bella)
- * sounded like a different person — that's what caused the "he keeps speaking
- * with different voices" complaint. If Gemini blips, retry ONCE on the same
- * voice rather than swapping characters.
- *
- * Gemini only outputs raw PCM (24kHz mono), so we prepend a 44-byte WAV header
- * and serve `audio/wav` — the browser <audio> element plays it natively.
- */
-const GEMINI_VOICES = new Set([
-  'Kore', 'Charon', 'Puck', 'Aoede', 'Fenrir', 'Leda', 'Orus', 'Zephyr',
-])
-
-function buildWavHeader(pcmByteLength, { sampleRate = 24000, channels = 1, bitsPerSample = 16 } = {}) {
-  const byteRate = sampleRate * channels * bitsPerSample / 8
-  const blockAlign = channels * bitsPerSample / 8
-  const buf = Buffer.alloc(44)
-  buf.write('RIFF', 0)
-  buf.writeUInt32LE(36 + pcmByteLength, 4)
-  buf.write('WAVE', 8)
-  buf.write('fmt ', 12)
-  buf.writeUInt32LE(16, 16)
-  buf.writeUInt16LE(1, 20)
-  buf.writeUInt16LE(channels, 22)
-  buf.writeUInt32LE(sampleRate, 24)
-  buf.writeUInt32LE(byteRate, 28)
-  buf.writeUInt16LE(blockAlign, 32)
-  buf.writeUInt16LE(bitsPerSample, 34)
-  buf.write('data', 36)
-  buf.writeUInt32LE(pcmByteLength, 40)
-  return buf
+export {
+  SIGHT_CONTEXT,
+  LANG_NAME,
+  searchOSMPlaces,
+  buildOSMEmbed,
+  fetchWeather,
+  extractActions,
+  classifyIntent,
+  applyIntent,
+  GREETING_RE,
+  CURRENT_INFO_RE,
+  GREETINGS,
+  GREETING_SUGGS,
+  summarizeLastAction,
+  narrateForcedAction,
 }
-
-async function speakGemini({ voice, input }) {
-  return fetch('https://openrouter.ai/api/v1/audio/speech', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'http://localhost:5173',
-      'X-Title': 'IZ Mangystau · Voice',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-3.1-flash-tts-preview',
-      input: input.slice(0, 3500),
-      voice,
-      response_format: 'pcm',
-    }),
-  })
-}
-
-app.post('/api/voice/tts', async (req, res) => {
-  try {
-    const { text, voice } = req.body
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ error: 'missing text' })
-    }
-
-    const geminiVoice = typeof voice === 'string' && GEMINI_VOICES.has(voice) ? voice : 'Kore'
-    let r = await speakGemini({ voice: geminiVoice, input: text })
-
-    if (!r.ok) {
-      const detail0 = await r.text().catch(() => '')
-      console.warn('gemini tts blipped, retrying same voice', r.status, detail0.slice(0, 120))
-      r = await speakGemini({ voice: geminiVoice, input: text })
-    }
-
-    if (!r.ok) {
-      const detail = await r.text().catch(() => '')
-      console.error('tts upstream error after retry', r.status, detail.slice(0, 200))
-      return res.status(502).json({ error: 'tts upstream', status: r.status })
-    }
-
-    const pcm = Buffer.from(await r.arrayBuffer())
-    const header = buildWavHeader(pcm.length)
-    const wav = Buffer.concat([header, pcm])
-    res.setHeader('Content-Type', 'audio/wav')
-    res.setHeader('Cache-Control', 'no-store')
-    res.setHeader('Content-Length', String(wav.length))
-    res.setHeader('X-TTS-Model', 'google/gemini-3.1-flash-tts-preview')
-    res.setHeader('X-TTS-Voice', geminiVoice)
-    return res.end(wav)
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: err?.message ?? 'tts failed' })
-  }
-})
-
-const port = process.env.PORT || 8787
-app.listen(port, () => console.log(`api listening on http://localhost:${port}`))

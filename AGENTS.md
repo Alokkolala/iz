@@ -62,6 +62,22 @@ When `/api/analyze` returns a `sightGuess`, the server matches it against a syno
 
 When adding photos: append to the bucket arrays. Tips should be one concrete technique line, written in all three languages.
 
+## Voice agent loop
+
+The `/api/voice/chat` handler runs a tool-calling loop, not a single LLM call.
+
+- **Shared handler**: `server/shared/voice.js` is the source of truth for both Express dev and the Vercel function.
+- **Tools**: `server/shared/agent/tools.js` defines the OpenRouter tool schema and dispatcher.
+  Current set: `search_pois`, `get_weather`, `show_sight`, `directions`, `remember`, `plan_day`.
+- **Loop**: `server/shared/agent/loop.js` runs max 4 hops with a 22s deadline, using Gemini Flash Lite and the `:online` variant for current-info turns.
+- **Memory**:
+  - `lastAction` is the last card the user saw, passed from the frontend each turn.
+  - A rolling short conversation summary is refreshed every 4 user turns.
+  - `user_facts` in Supabase stores stable preferences written by the `remember` tool.
+- **Safety net**: the regex classifier still runs when the loop does not produce a card, so high-confidence weather / route / nearby / sight requests can still force a card.
+
+When adding a new tool: append to `TOOL_SCHEMA`, add the handler branch in `dispatchTool`, and if it produces a card add the action kind and renderer in `VoiceChat.tsx`.
+
 ## Quirks to know
 
 - **`figma:asset/<filename>` imports** are resolved by the `figmaAssetResolver` Vite plugin to `src/assets/<filename>`. Leftover from a Figma Make export.
