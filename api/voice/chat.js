@@ -516,6 +516,43 @@ function summarizeLastAction(a) {
   return null
 }
 
+function narrateForcedAction(intent, action, L) {
+  if (!intent || !action) return null
+  if (intent.kind === 'go_nearest') {
+    if (action.missing) {
+      return {
+        en: "Couldn't find one near you — opening map search.",
+        ru: 'Рядом не нашёл — открою поиск на карте.',
+        kk: 'Жақын маңда таппадым — картадан іздеу ашамын.',
+      }[L]
+    }
+    const km = action.target?.distance_km
+    const name = action.target?.name || action.destination
+    return {
+      en: `Routing to ${name}, ${km} km away.`,
+      ru: `Прокладываю до ${name}, ${km} км.`,
+      kk: `${name} дейін бағыт салып жатырмын, ${km} км.`,
+    }[L]
+  }
+  if (intent.kind === 'near' && action.kind === 'places') {
+    const n = action.items?.length || 0
+    if (n === 0) {
+      return {
+        en: "Nothing tagged that close by — try a wider category.",
+        ru: 'Поблизости ничего не нашлось — попробуй шире.',
+        kk: 'Жақын маңда ештеңе жоқ — кеңірек санат таңда.',
+      }[L]
+    }
+    const closest = action.items[0]
+    return {
+      en: `${n} around you — closest is ${closest.name}, ${closest.distance_km} km.`,
+      ru: `${n} вокруг — ближе всех ${closest.name}, ${closest.distance_km} км.`,
+      kk: `Айналаңда ${n} орын — ең жақыны ${closest.name}, ${closest.distance_km} км.`,
+    }[L]
+  }
+  return null
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST')
@@ -611,7 +648,10 @@ ${SIGHT_CONTEXT}`
     const forced = await applyIntent(intent, hasLoc ? location : null, L)
     const finalAction = forced || parsed.action
 
-    res.json({ text: parsed.clean, action: finalAction, suggestions: parsed.suggestions })
+    const forcedText = forced ? narrateForcedAction(intent, forced, L) : null
+    const finalText = forcedText || parsed.clean
+
+    res.json({ text: finalText, action: finalAction, suggestions: parsed.suggestions })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err?.message ?? 'voice chat failed' })
