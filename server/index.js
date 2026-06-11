@@ -96,5 +96,44 @@ Respond with ONLY valid JSON, no prose, matching this shape exactly:
   }
 })
 
+app.post('/api/voice/chat', async (req, res) => {
+  try {
+    const { messages, lang } = req.body
+    const L = (lang === 'en' || lang === 'ru' || lang === 'kk') ? lang : 'ru'
+    const langName = LANG_NAME[L]
+
+    const system = `You are Iz — a friendly Mangystau travel coach having a real conversation, like a friend on a road trip.
+Speak entirely in ${langName}. No emojis, no markdown, no lists.
+Rules:
+- One or two short sentences per reply. Never lecture.
+- Use contractions and casual phrasing. Match the user's energy.
+- Topics: photo spots, light timing, routes, local culture and food. Mangystau focus.
+- If asked something outside Mangystau or travel, answer briefly then steer back kindly.
+- If you don't know, say so plainly in one sentence.
+
+${SIGHT_CONTEXT}`
+
+    const history = Array.isArray(messages)
+      ? messages
+          .filter((m) => m && typeof m.content === 'string' && (m.role === 'user' || m.role === 'assistant'))
+          .slice(-12)
+          .map((m) => ({ role: m.role, content: String(m.content).slice(0, 1200) }))
+      : []
+
+    const completion = await client.chat.completions.create({
+      model: 'google/gemini-2.5-flash-lite',
+      messages: [{ role: 'system', content: system }, ...history],
+      max_tokens: 220,
+      temperature: 0.7,
+    })
+
+    const text = completion.choices[0]?.message?.content?.trim() ?? ''
+    res.json({ text })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: err?.message ?? 'voice chat failed' })
+  }
+})
+
 const port = process.env.PORT || 8787
 app.listen(port, () => console.log(`api listening on http://localhost:${port}`))

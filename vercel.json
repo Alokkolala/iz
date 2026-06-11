@@ -6,6 +6,9 @@
   "functions": {
     "api/analyze.js": {
       "maxDuration": 60
+    },
+    "api/voice/chat.js": {
+      "maxDuration": 30
     }
   }
 }

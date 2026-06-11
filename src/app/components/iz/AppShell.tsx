@@ -5,15 +5,19 @@ import { TouristPulse } from "./TouristPulse";
 import { CrewMap } from "./CrewMap";
 import { ViralShotAssistant } from "./ViralShotAssistant";
 import { ProfileMini } from "./ProfileMini";
+import { VoiceChat } from "./VoiceChat";
 import type { TabId } from "./types";
 
 export function AppShell() {
   const [tab, setTab] = useState<TabId>("pulse");
+  const [voiceOpen, setVoiceOpen] = useState(false);
+
+  const openVoice = () => setVoiceOpen(true);
 
   const renderScreen = () => {
     switch (tab) {
       case "pulse":
-        return <TouristPulse onNavigate={setTab} />;
+        return <TouristPulse onNavigate={setTab} onOpenVoice={openVoice} />;
       case "crew":
         return <CrewMap onNavigate={setTab} />;
       case "lens":
@@ -40,6 +44,9 @@ export function AppShell() {
         </AnimatePresence>
       </div>
       <BottomNav active={tab} onChange={setTab} />
+      <AnimatePresence>
+        {voiceOpen && <VoiceChat onClose={() => setVoiceOpen(false)} />}
+      </AnimatePresence>
     </div>
   );
 }

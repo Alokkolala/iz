@@ -210,6 +210,31 @@ export const STRINGS: Dict = {
   // home continue
   continue_card: { en: "Pick up where you left off", ru: "Продолжить с того места", kk: "Қалдырған жерден жалғастыру" },
   open: { en: "Open", ru: "Открыть", kk: "Ашу" },
+
+  // voice chat
+  voice_kicker: { en: "Talk to Iz", ru: "Поговори с Iz", kk: "Iz-пен сөйлес" },
+  voice_title: { en: "Voice chat", ru: "Голосовой чат", kk: "Дауыстық чат" },
+  voice_tap_to_talk: { en: "Tap the bead to talk", ru: "Нажми каплю, чтобы говорить", kk: "Сөйлесу үшін тамшыны бас" },
+  voice_listening: { en: "Listening…", ru: "Слушаю…", kk: "Тыңдап тұрмын…" },
+  voice_thinking: { en: "Thinking…", ru: "Думаю…", kk: "Ойлап тұрмын…" },
+  voice_speaking: { en: "Speaking…", ru: "Говорю…", kk: "Сөйлеп тұрмын…" },
+  voice_intro_hint: {
+    en: "Ask about a spot, the best light, or how to get there.",
+    ru: "Спроси про место, лучший свет или как добраться.",
+    kk: "Орын, жарық немесе жол туралы сұра.",
+  },
+  voice_no_support: {
+    en: "Your browser doesn't support voice. Try Chrome.",
+    ru: "Браузер не поддерживает голос. Открой в Chrome.",
+    kk: "Браузер дауысты қолдамайды. Chrome-да ашыңыз.",
+  },
+  voice_mic_denied: {
+    en: "Microphone permission denied.",
+    ru: "Доступ к микрофону запрещён.",
+    kk: "Микрофонға рұқсат жоқ.",
+  },
+  voice_stop: { en: "Stop", ru: "Стоп", kk: "Тоқта" },
+  voice_close: { en: "Close", ru: "Закрыть", kk: "Жабу" },
 };
 
 interface I18nCtx {

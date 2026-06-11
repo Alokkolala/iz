@@ -15,6 +15,7 @@ import { ProfileAvatar } from "./ProfileAvatar";
 
 interface TouristPulseProps {
   onNavigate: (tab: TabId) => void;
+  onOpenVoice?: () => void;
 }
 
 const ease = [0.16, 1, 0.3, 1] as const;
@@ -24,7 +25,7 @@ const PHOTO_BOZZHYRA = "https://images.unsplash.com/photo-1774537346157-d84e5480
 const PHOTO_BAY = "https://images.unsplash.com/photo-1780845163089-c57658002946?auto=format&fit=crop&w=600&q=80";
 const PHOTO_TUZBAIR = "https://images.unsplash.com/photo-1775484866877-3e55f1f44fe4?auto=format&fit=crop&w=600&q=80";
 
-export function TouristPulse({ onNavigate }: TouristPulseProps) {
+export function TouristPulse({ onNavigate, onOpenVoice }: TouristPulseProps) {
   const { t } = useI18n();
   const { name, shots, spots } = useStore();
   const { user } = useAuth();
@@ -49,13 +50,25 @@ export function TouristPulse({ onNavigate }: TouristPulseProps) {
     <div className="flex h-full flex-col gap-6 overflow-y-auto px-5 pb-28 pt-12">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="h-12 w-12 shrink-0"><Stone3D lite className="h-12 w-12" /></div>
-        <div className="min-w-0 flex-1">
-          <Overline>{t("pulse_kicker")}</Overline>
+        <button
+          type="button"
+          onClick={onOpenVoice}
+          aria-label={t("voice_kicker")}
+          className="h-12 w-12 shrink-0 rounded-full focus-visible:outline-none"
+          style={{ background: "transparent" }}
+        >
+          <Stone3D lite className="h-12 w-12" />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenVoice}
+          className="min-w-0 flex-1 text-left focus-visible:outline-none"
+        >
+          <Overline>{t("voice_kicker")}</Overline>
           <p style={{ fontSize: 15, fontWeight: 600, color: "var(--iz-ink)" }}>
             {name ? t("greet_hi").replace("Iz", name) : t("greet_hi")}
           </p>
-        </div>
+        </button>
         <div className="flex items-center gap-2">
           <LangSwitcher />
           <ProfileAvatar onClick={() => onNavigate("profile")} />

@@ -268,6 +268,24 @@ export const Pose = (p: IconProps) => (
   </Svg>
 );
 
+/** Microphone */
+export const Mic = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" fillOpacity={FILL} />
+    <path d="M5.5 11a6.5 6.5 0 0 0 13 0" />
+    <path d="M12 17.5V21" />
+    <path d="M8.5 21h7" />
+  </Svg>
+);
+
+/** Close / X */
+export const X = (p: IconProps) => (
+  <Svg strokeWidth={2.4} {...p}>
+    <path d="M6 6l12 12" />
+    <path d="M18 6 6 18" />
+  </Svg>
+);
+
 /** Crop / framing */
 export const Crop = (p: IconProps) => (
   <Svg strokeWidth={2.1} {...p}>
