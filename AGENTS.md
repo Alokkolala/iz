@@ -7,8 +7,10 @@ A mobile-first photo coach for travelers in the **Mangystau region of Kazakhstan
 ## Stack
 
 - **Frontend**: Vite 6, React 18, TypeScript, Tailwind 4, Radix UI primitives, Motion (Framer), @react-three/fiber, MUI islands.
-- **Backend**: Express server (`server/index.js`) on port 8787, proxied from Vite at `/api`.
-- **AI**: OpenRouter → `google/gemini-2.5-flash-lite` for vision/JSON.
+- **Backend**:
+  - Dev — Express server (`server/index.js`) on port 8787, proxied from Vite at `/api`.
+  - Prod — Vercel Functions in `api/`: `analyze.js`, `delete-account.js`, `voice/chat.js`, `voice/tts.js`. Source of truth is the Express server; keep the two in sync when you edit endpoints.
+- **AI**: OpenRouter → `google/gemini-2.5-flash-lite` for vision/JSON and voice chat. TTS via OpenRouter `/audio/speech` — `google/gemini-3.1-flash-tts-preview` (PCM, wrapped as WAV) with `hexgrad/kokoro-82m` (MP3) as fallback.
 - **Auth + persistence**: Supabase (`src/lib/supabase.ts`, `AuthProvider.tsx`, `db.ts`). Tables: `profiles`, `analyses`, `crew_invites`.
 - **i18n**: 3 languages — en / ru / **ru is the default**, kk. All UI strings live in `src/app/components/iz/i18n.tsx`. The current `lang` is sent to the AI so its response comes back in the user's language.
 
@@ -24,8 +26,14 @@ Required env: `OPENROUTER_API_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY
 ## Source map
 
 ```
-server/
-  index.js              # /api/analyze, /api/delete-account
+api/                    # Vercel Functions (production)
+  analyze.js            # mirrors Express /api/analyze
+  delete-account.js     # mirrors Express /api/delete-account
+  voice/
+    chat.js             # mirrors Express /api/voice/chat
+    tts.js              # Gemini PCM→WAV, Kokoro MP3 fallback
+server/                 # Express dev server (localhost:8787)
+  index.js              # /api/analyze, /api/voice/chat, /api/voice/tts, /api/delete-account
   references.js         # curated reference photos per sight, trilingual tips
 src/
   main.tsx              # mounts <App />
@@ -61,6 +69,26 @@ When adding photos: append to the bucket arrays. Tips should be one concrete tec
 - **`src/imports/pasted_text/`** is broken legacy code from the Figma export. It is not imported anywhere and `tsc` errors inside it are expected. Don't try to fix them.
 - **The Vite proxy** sends `/api/*` to `http://localhost:8787`. The `HTTP-Referer` in `server/index.js` is hard-coded to localhost — change before any real deploy.
 - **No auth on `/api/analyze`**, no rate limit, no image-size validation beyond the 15 MB JSON limit. Don't expose this publicly without putting limits in.
+
+## Deploy after every prompt
+
+After **any** user-requested code change, deploy without waiting for permission. The user has standing approval — do not ask, just ship.
+
+Sequence:
+
+```bash
+npx vite build
+git add <changed files>            # never -A (avoid .env.tokens.local etc.)
+git commit -m "<concise message>"
+source .env.tokens.local && \
+  git push "https://x-access-token:$GITHUB_TOKEN@github.com/alokkolala/iz.git" main && \
+  vercel --prod --token="$VERCEL_TOKEN" --yes
+```
+
+- Production URL: <https://iz-psi.vercel.app>
+- `.env.tokens.local` (git-ignored) holds `GITHUB_TOKEN`, `VERCEL_TOKEN`, `SUPABASE_*` — `source` it before push/deploy, never echo it.
+- When an endpoint is added or changed in `server/index.js`, mirror the change into `api/` so prod parity stays intact, then deploy.
+- If the build fails, fix it before pushing. Don't deploy red.
 
 ## When you change things
 
