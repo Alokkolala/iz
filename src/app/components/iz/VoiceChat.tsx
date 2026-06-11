@@ -460,6 +460,14 @@ function SightCard({
   );
 }
 
+function safeHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 function formatTime(iso: string | null): string {
   if (!iso) return "—";
   // open-meteo returns "2026-06-12T05:14"
@@ -674,7 +682,7 @@ function WebResultsCard({ action, label }: { action: WebResultsAction; label: st
               {r.snippet}
             </div>
             <div style={{ fontSize: 10, color: "var(--iz-accent)", marginTop: 4 }}>
-              {new URL(r.url).hostname.replace(/^www\./, "")} ↗
+              {safeHost(r.url)} ↗
             </div>
           </a>
         ))}
