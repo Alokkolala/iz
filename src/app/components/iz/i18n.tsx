@@ -254,6 +254,8 @@ export const STRINGS: Dict = {
   voice_compose_placeholder: { en: "Ask anything…", ru: "Спроси что угодно…", kk: "Не болса да сұра…" },
   voice_send: { en: "Send", ru: "Отправить", kk: "Жіберу" },
   voice_web_results: { en: "Web results", ru: "Из интернета", kk: "Интернеттен" },
+  voice_route_stops: { en: "Route", ru: "Маршрут", kk: "Бағыт" },
+  voice_open_route: { en: "Open in Maps", ru: "Открыть маршрут", kk: "Картадан ашу" },
 };
 
 interface I18nCtx {

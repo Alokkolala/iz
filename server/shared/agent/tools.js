@@ -2,6 +2,7 @@ import { pickReferences } from '../../references.js'
 import { saveFact } from './memory.js'
 import { buildOSMEmbed, fetchWeather, searchOSMPlaces } from '../voice-primitives.js'
 import { searchWeb } from './tools/web-search.js'
+import { buildMultiStopRoute } from './tools/route.js'
 
 export const TOOL_SCHEMA = [
   {
@@ -90,6 +91,24 @@ export const TOOL_SCHEMA = [
           query: { type: 'string', description: 'Search query. Be specific.' },
         },
         required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'build_route',
+      description: 'Build a multi-stop driving route from the user location through one or more places. Use for itineraries, road trips, or "take me to A then B then C".',
+      parameters: {
+        type: 'object',
+        properties: {
+          stops: {
+            type: 'array',
+            description: 'Ordered list of place names. Last item is the final destination.',
+            items: { type: 'string' },
+          },
+        },
+        required: ['stops'],
       },
     },
   },
@@ -226,6 +245,19 @@ export async function dispatchTool(name, args, ctx) {
         query,
         count: items.length,
         results: items.map((r) => ({ title: r.title, snippet: r.snippet, url: r.url })),
+      },
+    }
+  }
+
+  if (name === 'build_route') {
+    const stops = Array.isArray(args?.stops) ? args.stops : []
+    const result = await withTimeout(buildMultiStopRoute(loc, stops), 12000, null)
+    if (!result) return { toolResult: { error: 'route_failed', stops } }
+    return {
+      display: { kind: 'route', url: result.url, stops: result.stops, origin: loc },
+      toolResult: {
+        url: result.url,
+        stops: result.stops.map((s) => s.name),
       },
     }
   }

@@ -39,6 +39,7 @@ TOOLS:
 - For a named Mangystau sight or photo/reference request: call show_sight.
 - For routes, navigation, or "take me to X": call directions.
 - For current-info questions outside Mangystau curated data — news, prices, opening hours, events, schedules: call web_search.
+- For multi-stop routes, day trips, "route through A and B": call build_route.
 - For "what can I do", "куда сходить", "чем заняться", or a quick itinerary: call plan_day.
 - For stable user preferences you just learned: call remember.
 

@@ -74,7 +74,14 @@ type PlanAction = {
 };
 type WebResult = { title: string; url: string; snippet: string };
 type WebResultsAction = { kind: "web_results"; query: string; items: WebResult[] };
-type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction | PlanAction | WebResultsAction;
+type RouteStop = { name: string; display: string; lat: number; lon: number };
+type RouteAction = {
+  kind: "route";
+  url: string;
+  stops: RouteStop[];
+  origin: { lat: number; lon: number } | null;
+};
+type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction | PlanAction | WebResultsAction | RouteAction;
 type Msg = {
   role: "user" | "assistant";
   text: string;
@@ -691,6 +698,96 @@ function WebResultsCard({ action, label }: { action: WebResultsAction; label: st
   );
 }
 
+function RouteCard({
+  action,
+  labelStops,
+  labelOpen,
+}: {
+  action: RouteAction;
+  labelStops: string;
+  labelOpen: string;
+}) {
+  return (
+    <div
+      className="mt-2 w-full max-w-[320px] overflow-hidden rounded-2xl"
+      style={{
+        background: "rgba(255,255,255,0.08)",
+        border: "1px solid rgba(255,255,255,0.16)",
+        backdropFilter: "blur(14px)",
+        WebkitBackdropFilter: "blur(14px)",
+      }}
+    >
+      <div
+        className="px-3 py-2 uppercase"
+        style={{
+          fontSize: 10,
+          letterSpacing: "0.12em",
+          color: "rgba(94,234,212,0.86)",
+          fontWeight: 700,
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
+        }}
+      >
+        {labelStops}
+      </div>
+      <ol className="m-0 flex flex-col" style={{ paddingLeft: 0 }}>
+        {action.stops.map((s, i) => (
+          <li
+            key={`${s.name}-${i}`}
+            className="flex items-start gap-2 px-3 py-2"
+            style={{
+              borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
+              color: "#fff",
+              listStyle: "none",
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                display: "inline-flex",
+                width: 22,
+                height: 22,
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "50%",
+                background: "rgba(45,212,191,0.15)",
+                border: "1px solid rgba(45,212,191,0.5)",
+                color: "#5eead4",
+                fontSize: 11,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}
+            >
+              {i + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{s.name}</div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", lineHeight: 1.3 }}>
+                {s.display}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <a
+        href={action.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center justify-center gap-1.5 px-3 py-2.5"
+        style={{
+          background: "var(--iz-accent)",
+          color: "var(--iz-on-accent)",
+          fontSize: 13,
+          fontWeight: 700,
+          textDecoration: "none",
+        }}
+      >
+        <MapPinIcon size={13} />
+        {labelOpen} ↗
+      </a>
+    </div>
+  );
+}
+
 function Bubble({
   msg,
   isLast,
@@ -706,6 +803,8 @@ function Bubble({
   labelSunrise,
   labelSunset,
   labelWebResults,
+  labelRouteStops,
+  labelOpenRoute,
 }: {
   msg: Msg;
   isLast: boolean;
@@ -721,6 +820,8 @@ function Bubble({
   labelSunrise: string;
   labelSunset: string;
   labelWebResults: string;
+  labelRouteStops: string;
+  labelOpenRoute: string;
 }) {
   if (msg.role === "user") {
     return (
@@ -800,6 +901,13 @@ function Bubble({
         {msg.action?.kind === "plan" && <PlanCard action={msg.action} />}
         {msg.action?.kind === "web_results" && (
           <WebResultsCard action={msg.action} label={labelWebResults} />
+        )}
+        {msg.action?.kind === "route" && (
+          <RouteCard
+            action={msg.action}
+            labelStops={labelRouteStops}
+            labelOpen={labelOpenRoute}
+          />
         )}
         {isLast && msg.suggestions && msg.suggestions.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1329,6 +1437,20 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
               snippet: String(r.snippet ?? ""),
             })),
         };
+      } else if (a && a.kind === "route" && typeof a.url === "string" && Array.isArray(a.stops)) {
+        action = {
+          kind: "route",
+          url: String(a.url),
+          origin: a.origin ?? null,
+          stops: a.stops
+            .filter((s: any) => s && Number.isFinite(s.lat) && Number.isFinite(s.lon))
+            .map((s: any) => ({
+              name: String(s.name ?? ""),
+              display: String(s.display ?? s.name ?? ""),
+              lat: Number(s.lat),
+              lon: Number(s.lon),
+            })),
+        };
       }
       const suggestions: string[] = Array.isArray(data?.suggestions)
         ? data.suggestions.filter((s: any) => typeof s === "string" && s.length).slice(0, 3)
@@ -1592,6 +1714,8 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
                 labelSunrise={t("voice_sunrise")}
                 labelSunset={t("voice_sunset")}
                 labelWebResults={t("voice_web_results")}
+                labelRouteStops={t("voice_route_stops")}
+                labelOpenRoute={t("voice_open_route")}
               />
             ))}
             {status === "thinking" && <TypingRow key="typing" />}
