@@ -164,8 +164,16 @@ function haversineKm(lat1, lon1, lat2, lon2) {
  * Tries 5 km first, expands to 20 km if nothing comes back — Mangystau is
  * sparse. Returns at most 8 nearest, sorted by haversine distance.
  */
+// Public Overpass returns 406 without a User-Agent. Three mirrors so a single
+// node going down doesn't kill the agent.
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.openstreetmap.fr/api/interpreter',
+]
+const OVERPASS_UA = 'iz-mangystau-voice/1.0 (https://iz-psi.vercel.app)'
+
 async function searchOSMPlaces(category, lat, lon) {
-  // Union super-categories combine multiple OSM tags in one query.
   const tags = OSM_UNIONS[category]
     ? OSM_UNIONS[category]
     : [OSM_TAGS[category] || OSM_TAGS.attraction]
@@ -177,14 +185,27 @@ async function searchOSMPlaces(category, lat, lon) {
       ])
       .join('')
     const q = `[out:json][timeout:15];(${parts});out center 60;`
-    const r = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'data=' + encodeURIComponent(q),
-    })
-    if (!r.ok) throw new Error(`overpass ${r.status}`)
-    const j = await r.json()
-    return Array.isArray(j.elements) ? j.elements : []
+    let lastErr = null
+    for (const ep of OVERPASS_ENDPOINTS) {
+      try {
+        const r = await fetch(ep, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': OVERPASS_UA,
+            Accept: 'application/json',
+          },
+          body: 'data=' + encodeURIComponent(q),
+        })
+        if (!r.ok) { lastErr = new Error(`overpass ${r.status}`); continue }
+        const ct = r.headers.get('content-type') || ''
+        if (!ct.includes('json')) { lastErr = new Error(`overpass non-json (${ct})`); continue }
+        const j = await r.json()
+        return Array.isArray(j.elements) ? j.elements : []
+      } catch (err) { lastErr = err }
+    }
+    if (lastErr) throw lastErr
+    return []
   }
   let elements = []
   try {
@@ -200,8 +221,15 @@ async function searchOSMPlaces(category, lat, lon) {
       const plon = e.lon ?? e.center?.lon
       if (!Number.isFinite(plat) || !Number.isFinite(plon)) return null
       const t = e.tags || {}
-      const name = t['name:en'] || t.name || t.brand || null
-      if (!name) return null
+      const name =
+        t['name:en'] ||
+        t.name ||
+        t['name:ru'] ||
+        t['name:kk'] ||
+        t.brand ||
+        t.operator ||
+        // Fall back to the OSM type so unnamed POIs still appear.
+        (t.amenity || t.shop || t.tourism || t.leisure || category).replace(/_/g, ' ')
       return {
         name,
         lat: plat,
