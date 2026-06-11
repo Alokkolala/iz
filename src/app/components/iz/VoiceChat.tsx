@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react";
 import { useI18n, type Lang } from "./i18n";
 import { X } from "./Icons";
+import { Stone3D } from "./Stone3D";
 
 const VoiceSphere = lazy(() => import("./VoiceSphere"));
 
@@ -31,6 +32,104 @@ const VoiceSphere = lazy(() => import("./VoiceSphere"));
 type Status = "idle" | "listening" | "thinking" | "speaking" | "error";
 type Msg = { role: "user" | "assistant"; text: string };
 
+/* ---- chat-bubble pieces (ported from ChatUI reference, tuned for the
+ * dark voice-overlay backdrop) -------------------------------------------- */
+const bubbleEase = [0.16, 1, 0.3, 1] as const;
+
+function Avatar() {
+  return (
+    <div className="relative h-7 w-7 shrink-0">
+      <span
+        className="absolute inset-0 rounded-full"
+        style={{ background: "var(--iz-accent)", opacity: 0.22, filter: "blur(8px)" }}
+      />
+      <Stone3D lite className="relative h-7 w-7" />
+    </div>
+  );
+}
+
+function Bubble({ msg }: { msg: Msg }) {
+  if (msg.role === "user") {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.28, ease: bubbleEase }}
+        className="flex justify-end"
+      >
+        <div
+          className="max-w-[82%] rounded-2xl rounded-br-md px-3.5 py-2"
+          style={{
+            background: "var(--iz-accent)",
+            color: "var(--iz-on-accent)",
+            boxShadow: "0 6px 22px rgba(46,230,201,0.28)",
+            fontSize: 14,
+            fontWeight: 500,
+            lineHeight: 1.4,
+          }}
+        >
+          {msg.text}
+        </div>
+      </motion.div>
+    );
+  }
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.28, ease: bubbleEase }}
+      className="flex items-end gap-2"
+    >
+      <Avatar />
+      <div
+        className="max-w-[82%] rounded-2xl rounded-bl-md px-3.5 py-2 backdrop-blur-xl"
+        style={{
+          background: "rgba(255,255,255,0.12)",
+          border: "1px solid rgba(255,255,255,0.18)",
+          color: "#fff",
+          fontSize: 14,
+          lineHeight: 1.45,
+        }}
+      >
+        {msg.text}
+      </div>
+    </motion.div>
+  );
+}
+
+function TypingRow() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="flex items-end gap-2"
+    >
+      <Avatar />
+      <div
+        className="flex items-center gap-1 rounded-2xl px-3.5 py-2.5 backdrop-blur-xl"
+        style={{
+          background: "rgba(255,255,255,0.12)",
+          border: "1px solid rgba(255,255,255,0.18)",
+        }}
+      >
+        {[0, 1, 2].map((i) => (
+          <motion.span
+            key={i}
+            className="block h-1.5 w-1.5 rounded-full"
+            style={{ background: "rgba(255,255,255,0.85)" }}
+            animate={{ opacity: [0.3, 1, 0.3], y: [0, -2, 0] }}
+            transition={{ duration: 1, repeat: Infinity, delay: i * 0.18 }}
+          />
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
 const LANG_TO_LOCALE: Record<Lang, string> = {
   en: "en-US",
   ru: "ru-RU",
@@ -49,6 +148,7 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
 
   // amplitude written 60×/s, read by the WebGL sphere — never via React state
   const amplitudeRef = useRef(0);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // STT
   const recognitionRef = useRef<any>(null);
@@ -78,6 +178,13 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
   statusRef.current = status;
   messagesRef.current = messages;
   langRef.current = lang;
+
+  // auto-scroll the chat to the latest bubble whenever it grows or status flips
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [messages, status]);
 
   // ---- amplitude polling loop (writes amplitudeRef each frame) ----------
   useEffect(() => {
@@ -524,42 +631,19 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
         )}
       </div>
 
-      {/* Transcript */}
+      {/* Chat — full conversation with bubbles, avatars, and a typing row
+          while Iz is thinking. Auto-scrolls to the latest reply. */}
       <div
+        ref={scrollRef}
         className="flex-1 overflow-y-auto px-5 pb-28 pt-6"
         style={{ scrollbarWidth: "none" }}
       >
-        <div className="mx-auto flex max-w-[360px] flex-col gap-2.5">
+        <div className="mx-auto flex max-w-[360px] flex-col gap-3">
           <AnimatePresence initial={false}>
-            {messages.slice(-8).map((m, i) => (
-              <motion.div
-                key={`${i}-${m.role}-${m.text.slice(0, 8)}`}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.25 }}
-                className={`max-w-[86%] rounded-2xl px-3.5 py-2 ${
-                  m.role === "user" ? "self-end" : "self-start"
-                }`}
-                style={
-                  m.role === "user"
-                    ? {
-                        background: "rgba(46,230,201,0.92)",
-                        color: "#062a26",
-                        fontWeight: 500,
-                        fontSize: 14,
-                      }
-                    : {
-                        background: "rgba(255,255,255,0.16)",
-                        color: "#fff",
-                        border: "1px solid rgba(255,255,255,0.22)",
-                        fontSize: 14,
-                      }
-                }
-              >
-                {m.text}
-              </motion.div>
+            {messages.map((m, i) => (
+              <Bubble key={`${i}-${m.role}-${m.text.slice(0, 12)}`} msg={m} />
             ))}
+            {status === "thinking" && <TypingRow key="typing" />}
           </AnimatePresence>
         </div>
       </div>
