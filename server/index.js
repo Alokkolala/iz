@@ -371,6 +371,112 @@ async function extractActions(text, location, L) {
  * Bypasses the LLM entirely — instant, free, on-brand, never tries to
  * search the web for kindergarten lesson plans about water droplets.
  */
+/**
+ * Deterministic intent classifier — Gemini-Flash-Lite is too small to route
+ * markers reliably, so we run regexes on the user's last message and force
+ * the action server-side. The model's text reply still flows through; we
+ * just override which card shows up next to it.
+ *
+ * Order matters: GO (specific route) > SIGHT (named landmark) > WEATHER >
+ * NEAR (around me). Returns { kind, payload } or null.
+ */
+const SIGHT_KEYWORDS = [
+  { bucket: 'bozzhyra', needles: /бозжыр|бозжир|боszhyra|боszhira|bozzhyra|bozzhira|boszhira|bozjyra|клык|fangs/i },
+  { bucket: 'sherkala', needles: /шерқал|шеркал|sherkala|sherqala|shirkala|lion mountain/i },
+  { bucket: 'tuzbair',  needles: /тузба|тұзбайыр|tuzbair|tuz bair|sor tuzbair|airakty|айракты/i },
+  { bucket: 'torysh',   needles: /торыш|долин.{0,6}шар|valley of balls|stone balls|torysh|torish|шар(?:ы|ов|ики)/i },
+  { bucket: 'kyzylkup', needles: /кызылкуп|қызылқұп|kyzylkup|qyzylqup|тирамису|tiramisu/i },
+  { bucket: 'caspian',  needles: /каспий|каспи|caspian|актау|ақтау|aktau|набережн|promenade|coast|beach|пляж/i },
+]
+const NEAR_KEYWORDS = [
+  { cat: 'cafe',         needles: /кафе|кофе|cafe|coffee/i },
+  { cat: 'restaurant',   needles: /ресторан|поесть|пообедать|поужинать|restaurant|where to eat|еду\b|еда\b/i },
+  { cat: 'fast_food',    needles: /фастфуд|fast food|burger|бургер|пицц/i },
+  { cat: 'bar',          needles: /\bбар\b|\bbar\b|выпить|drink/i },
+  { cat: 'fuel',         needles: /заправ|бензин|fuel|gas station|petrol/i },
+  { cat: 'pharmacy',     needles: /аптек|pharmacy|drugstore|лекарств/i },
+  { cat: 'atm',          needles: /банкомат|atm|cash machine/i },
+  { cat: 'parking',      needles: /парковк|parking|park the car/i },
+  { cat: 'supermarket',  needles: /магазин|supermarket|grocery|продукт/i },
+  { cat: 'hotel',        needles: /отель|гостиниц|hotel|переночев|hostel|hostel|stay the night/i },
+  { cat: 'viewpoint',    needles: /смотровая|viewpoint|обзор|вид с/i },
+  { cat: 'museum',       needles: /музей|museum/i },
+  { cat: 'attraction',   needles: /достопримеч|attraction/i },
+]
+const WEATHER_RE = /\bпогод|\bпрогноз|ауа рай|\bweather\b|\bforecast\b|температур|жарко|холодно|will it rain|дожд|ветер|снег|wind\b|sunrise|sunset|закат|восход/i
+const NEAR_GENERIC_RE = /(что|where).{0,8}(рядом|вокруг|around|near|nearby|close to me|поблизости|near me)/i
+const GO_RE = /(take me to|route to|поехали в|как добраться до|проложи маршрут|маршрут до|drive me to|navigate to)/i
+
+function classifyIntent(userText) {
+  if (!userText) return null
+  const s = String(userText).trim()
+  if (!s) return null
+  // 1. GO — explicit "take me to X"
+  const go = s.match(GO_RE)
+  if (go) {
+    const after = s.slice(go.index + go[0].length).replace(/[?!.,]+$/, '').trim()
+    if (after) return { kind: 'go', destination: after }
+  }
+  // 2. SIGHT — explicit landmark mention
+  for (const { bucket, needles } of SIGHT_KEYWORDS) {
+    if (needles.test(s)) return { kind: 'sight', bucket }
+  }
+  // 3. WEATHER — explicit weather words
+  if (WEATHER_RE.test(s)) return { kind: 'weather' }
+  // 4. NEAR — "what's around" generic, or a NEAR category keyword
+  if (NEAR_GENERIC_RE.test(s)) {
+    for (const { cat, needles } of NEAR_KEYWORDS) {
+      if (needles.test(s)) return { kind: 'near', category: cat }
+    }
+    return { kind: 'near', category: 'attraction' }
+  }
+  for (const { cat, needles } of NEAR_KEYWORDS) {
+    // a category keyword alone implies "near me" in this app's context
+    if (needles.test(s) && /рядом|вокруг|around|near|поблизост|закрыт|открыт|где|where/i.test(s)) {
+      return { kind: 'near', category: cat }
+    }
+  }
+  return null
+}
+
+async function applyIntent(intent, location, L) {
+  if (!intent) return null
+  if (intent.kind === 'weather' && location) {
+    return await fetchWeather(location.lat, location.lon, L)
+  }
+  if (intent.kind === 'sight') {
+    const photos = pickReferences(intent.bucket, L).slice(0, 8)
+    if (!photos.length) return null
+    const mapsQuery = encodeURIComponent(`${intent.bucket}, Mangystau, Kazakhstan`)
+    const origin =
+      location && Number.isFinite(location.lat) && Number.isFinite(location.lon)
+        ? `&origin=${location.lat},${location.lon}`
+        : ''
+    const routeUrl = `https://www.google.com/maps/dir/?api=1${origin}&destination=${mapsQuery}&travelmode=driving`
+    return { kind: 'sight', bucket: intent.bucket, photos, routeUrl }
+  }
+  if (intent.kind === 'near' && location) {
+    const items = await searchOSMPlaces(intent.category, location.lat, location.lon)
+    const embedUrl = buildOSMEmbed(location.lat, location.lon, items)
+    const listUrl = `https://www.google.com/maps/search/${encodeURIComponent(intent.category)}/@${location.lat},${location.lon},13z`
+    return { kind: 'places', category: intent.category, items, embedUrl, listUrl, origin: { lat: location.lat, lon: location.lon } }
+  }
+  if (intent.kind === 'go') {
+    const dest = encodeURIComponent(
+      /mangystau|mangistau|kazakhstan/i.test(intent.destination)
+        ? intent.destination
+        : `${intent.destination}, Mangystau, Kazakhstan`,
+    )
+    const origin =
+      location && Number.isFinite(location.lat) && Number.isFinite(location.lon)
+        ? `&origin=${location.lat},${location.lon}`
+        : ''
+    const url = `https://www.google.com/maps/dir/?api=1${origin}&destination=${dest}&travelmode=driving`
+    return { kind: 'directions', destination: intent.destination, url }
+  }
+  return null
+}
+
 const GREETING_RE = /^\s*(привет|здравствуй|здарова|здорово|hi|hey|hello|hola|салам|сәлем|salem|капля|kaplya|капелька|iz|из|йо|yo)[\s!.,?]*$/i
 const GREETINGS = {
   en: [
@@ -479,8 +585,16 @@ ${SIGHT_CONTEXT}`
     })
 
     const raw = completion.choices[0]?.message?.content?.trim() ?? ''
-    const { clean, action, suggestions } = await extractActions(raw, hasLoc ? location : null, L)
-    res.json({ text: clean, action, suggestions })
+    const parsed = await extractActions(raw, hasLoc ? location : null, L)
+
+    // Deterministic intent override — Gemini-Flash-Lite is too small to route
+    // markers reliably, so if our regex classifier sees a clear weather/sight/
+    // near intent in the last user message, we replace the model's action.
+    const intent = classifyIntent(lastUser)
+    const forced = await applyIntent(intent, hasLoc ? location : null, L)
+    const finalAction = forced || parsed.action
+
+    res.json({ text: parsed.clean, action: finalAction, suggestions: parsed.suggestions })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err?.message ?? 'voice chat failed' })
