@@ -1,31 +1,33 @@
-const LANG_NAME = { en: 'English', ru: 'Russian', kk: 'Kazakh' }
+import { Readable } from 'node:stream'
 
 export const config = {
   api: { bodyParser: { sizeLimit: '1mb' } },
   maxDuration: 30,
 }
 
+/**
+ * TTS via OpenRouter, mirrors the dev server in server/index.js.
+ * Model: hexgrad/kokoro-82m (open-source, much cheaper than OpenAI voices,
+ * English-first; ru/kk quality is limited).
+ *
+ * Streams the MP3 straight through so playback can start before generation finishes.
+ * Vercel Fluid Compute supports response streaming on Node functions.
+ */
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST')
     return res.status(405).json({ error: 'method not allowed' })
   }
   try {
-    const { text, lang, voice } = req.body ?? {}
+    const { text, voice } = req.body ?? {}
     if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'missing text' })
     }
-    const L = (lang === 'en' || lang === 'ru' || lang === 'kk') ? lang : 'ru'
-    const langName = LANG_NAME[L]
-    const voiceId = typeof voice === 'string' && voice ? voice : 'coral'
+    const voiceId = typeof voice === 'string' && voice ? voice : 'alloy'
 
-    const instructions = `You are Iz — a friendly Mangystau travel guide having a real conversation with a friend on a road trip.
-Tone: warm, casual, low-key, like a close friend giving a tip — not a presenter or news anchor.
-Pace: relaxed and natural. Use small breaths and tiny pauses between thoughts.
-The text you are reading is written in ${langName}; speak it naturally in ${langName}.
-Do not add words, sound effects, or commentary — just read the text as if it were yours.`
-
-    const referer = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:5173'
+    const referer = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:5173'
 
     const r = await fetch('https://openrouter.ai/api/v1/audio/speech', {
       method: 'POST',
@@ -36,16 +38,10 @@ Do not add words, sound effects, or commentary — just read the text as if it w
         'X-Title': 'IZ Mangystau · Voice',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-4o-mini-tts',
+        model: 'hexgrad/kokoro-82m',
         input: text.slice(0, 3500),
         voice: voiceId,
         response_format: 'mp3',
-        speed: 1.02,
-        provider: {
-          options: {
-            openai: { instructions },
-          },
-        },
       }),
     })
 
@@ -57,9 +53,7 @@ Do not add words, sound effects, or commentary — just read the text as if it w
 
     res.setHeader('Content-Type', 'audio/mpeg')
     res.setHeader('Cache-Control', 'no-store')
-
-    const buf = Buffer.from(await r.arrayBuffer())
-    res.end(buf)
+    Readable.fromWeb(r.body).pipe(res)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err?.message ?? 'tts failed' })
