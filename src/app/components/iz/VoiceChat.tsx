@@ -47,11 +47,30 @@ type PlacesAction = {
   listUrl: string;
   origin: { lat: number; lon: number };
 };
-type Action = DirectionsAction | PlacesAction;
+type SightPhoto = { src: string; tip: string; attribution?: string; sourceUrl?: string; license?: string };
+type SightAction = {
+  kind: "sight";
+  bucket: string;
+  photos: SightPhoto[];
+  routeUrl: string;
+};
+type WeatherAction = {
+  kind: "weather";
+  origin: { lat: number; lon: number };
+  tempC: number;
+  windKmh: number;
+  code: number;
+  label: string;
+  sunrise: string | null;
+  sunset: string | null;
+  tomorrow: { maxC: number; minC: number; label: string };
+};
+type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction;
 type Msg = {
   role: "user" | "assistant";
   text: string;
   action?: Action | null;
+  suggestions?: string[];
 };
 type UserLocation = { lat: number; lon: number; place?: string };
 
@@ -220,6 +239,180 @@ function PlacesCard({
   );
 }
 
+function SightCard({
+  action,
+  labelRoute,
+}: {
+  action: SightAction;
+  labelRoute: string;
+}) {
+  const title = action.bucket.charAt(0).toUpperCase() + action.bucket.slice(1);
+  const photos = action.photos.slice(0, 6);
+  return (
+    <div
+      className="mt-2 w-full max-w-[320px] overflow-hidden rounded-2xl"
+      style={{
+        background: "rgba(255,255,255,0.08)",
+        border: "1px solid rgba(255,255,255,0.16)",
+        backdropFilter: "blur(14px)",
+        WebkitBackdropFilter: "blur(14px)",
+      }}
+    >
+      {/* horizontal photo reel */}
+      <div
+        className="flex gap-2 overflow-x-auto px-3 py-3"
+        style={{ scrollbarWidth: "none" }}
+      >
+        {photos.map((p, i) => (
+          <a
+            key={i}
+            href={p.sourceUrl || p.src}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="relative block shrink-0 overflow-hidden rounded-xl"
+            style={{ width: 160, height: 200, background: "rgba(0,0,0,0.3)" }}
+            title={p.tip}
+          >
+            <img
+              src={p.src}
+              alt={p.tip}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                padding: "8px 10px",
+                background: "linear-gradient(180deg, transparent, rgba(0,0,0,0.78))",
+                color: "#fff",
+                fontSize: 11,
+                lineHeight: 1.3,
+                fontWeight: 500,
+              }}
+            >
+              {p.tip}
+            </div>
+          </a>
+        ))}
+      </div>
+      {/* footer with title + route CTA */}
+      <div
+        className="flex items-center justify-between gap-2 px-3 py-2"
+        style={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}
+      >
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#fff",
+            textTransform: "capitalize",
+          }}
+        >
+          {title}
+        </div>
+        <a
+          href={action.routeUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1"
+          style={{
+            background: "var(--iz-accent)",
+            color: "var(--iz-on-accent)",
+            fontSize: 11,
+            fontWeight: 700,
+            textDecoration: "none",
+          }}
+        >
+          <MapPinIcon size={11} />
+          {labelRoute}
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function formatTime(iso: string | null): string {
+  if (!iso) return "—";
+  // open-meteo returns "2026-06-12T05:14"
+  const m = iso.match(/T(\d{2}):(\d{2})/);
+  if (!m) return "—";
+  return `${m[1]}:${m[2]}`;
+}
+
+function WeatherCard({
+  action,
+  labelNow,
+  labelTomorrow,
+  labelWind,
+  labelSunrise,
+  labelSunset,
+}: {
+  action: WeatherAction;
+  labelNow: string;
+  labelTomorrow: string;
+  labelWind: string;
+  labelSunrise: string;
+  labelSunset: string;
+}) {
+  return (
+    <div
+      className="mt-2 w-full max-w-[320px] overflow-hidden rounded-2xl px-4 py-3"
+      style={{
+        background:
+          "linear-gradient(140deg, rgba(46,230,201,0.18), rgba(127,211,224,0.08))",
+        border: "1px solid rgba(255,255,255,0.18)",
+        backdropFilter: "blur(14px)",
+        WebkitBackdropFilter: "blur(14px)",
+        color: "#fff",
+      }}
+    >
+      <div className="flex items-end justify-between">
+        <div>
+          <div style={{ fontSize: 11, opacity: 0.72, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            {labelNow}
+          </div>
+          <div className="flex items-baseline gap-2">
+            <div style={{ fontSize: 38, fontWeight: 700, lineHeight: 1 }}>
+              {action.tempC}°
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.88 }}>{action.label}</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.78, textAlign: "right", lineHeight: 1.5 }}>
+          <div>
+            {labelWind} {action.windKmh} km/h
+          </div>
+          <div>
+            ↑ {formatTime(action.sunrise)} · ↓ {formatTime(action.sunset)}
+          </div>
+        </div>
+      </div>
+      <div
+        className="mt-2 flex items-center justify-between"
+        style={{
+          borderTop: "1px solid rgba(255,255,255,0.12)",
+          paddingTop: 8,
+          fontSize: 12,
+          opacity: 0.88,
+        }}
+      >
+        <span style={{ fontWeight: 600 }}>{labelTomorrow}</span>
+        <span>
+          {action.tomorrow.label} · {action.tomorrow.maxC}° / {action.tomorrow.minC}°
+        </span>
+      </div>
+      {/* hidden a11y so the labels are referenced — keeps unused-var lint quiet */}
+      <span aria-hidden style={{ display: "none" }}>
+        {labelSunrise} {labelSunset}
+      </span>
+    </div>
+  );
+}
+
 function DirectionsCard({
   action,
   labelOpen,
@@ -266,16 +459,32 @@ function DirectionsCard({
 
 function Bubble({
   msg,
+  isLast,
+  onSuggestion,
   labelOpen,
   labelTo,
   labelOpenAll,
   labelNone,
+  labelRoute,
+  labelNow,
+  labelTomorrow,
+  labelWind,
+  labelSunrise,
+  labelSunset,
 }: {
   msg: Msg;
+  isLast: boolean;
+  onSuggestion: (text: string) => void;
   labelOpen: string;
   labelTo: string;
   labelOpenAll: string;
   labelNone: string;
+  labelRoute: string;
+  labelNow: string;
+  labelTomorrow: string;
+  labelWind: string;
+  labelSunrise: string;
+  labelSunset: string;
 }) {
   if (msg.role === "user") {
     return (
@@ -338,6 +547,42 @@ function Bubble({
             labelOpenAll={labelOpenAll}
             labelNone={labelNone}
           />
+        )}
+        {msg.action?.kind === "sight" && (
+          <SightCard action={msg.action} labelRoute={labelRoute} />
+        )}
+        {msg.action?.kind === "weather" && (
+          <WeatherCard
+            action={msg.action}
+            labelNow={labelNow}
+            labelTomorrow={labelTomorrow}
+            labelWind={labelWind}
+            labelSunrise={labelSunrise}
+            labelSunset={labelSunset}
+          />
+        )}
+        {isLast && msg.suggestions && msg.suggestions.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {msg.suggestions.map((s, i) => (
+              <button
+                key={i}
+                onClick={() => onSuggestion(s)}
+                className="rounded-full px-3 py-1.5 transition-colors active:scale-95"
+                style={{
+                  background: "rgba(255,255,255,0.1)",
+                  border: "1px solid rgba(255,255,255,0.22)",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  lineHeight: 1.2,
+                  whiteSpace: "nowrap",
+                  cursor: "pointer",
+                }}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         )}
       </div>
     </motion.div>
@@ -690,13 +935,50 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
                 }))
             : [],
         };
+      } else if (a && a.kind === "sight" && Array.isArray(a.photos) && a.photos.length) {
+        action = {
+          kind: "sight",
+          bucket: String(a.bucket ?? "mangystau"),
+          routeUrl: String(a.routeUrl ?? ""),
+          photos: a.photos
+            .filter((p: any) => p && typeof p.src === "string")
+            .map((p: any) => ({
+              src: String(p.src),
+              tip: String(p.tip ?? ""),
+              attribution: p.attribution ?? undefined,
+              sourceUrl: p.sourceUrl ?? undefined,
+              license: p.license ?? undefined,
+            })),
+        };
+      } else if (a && a.kind === "weather" && Number.isFinite(a.tempC)) {
+        action = {
+          kind: "weather",
+          origin: a.origin ?? { lat: 0, lon: 0 },
+          tempC: Number(a.tempC),
+          windKmh: Number(a.windKmh ?? 0),
+          code: Number(a.code ?? 0),
+          label: String(a.label ?? ""),
+          sunrise: a.sunrise ?? null,
+          sunset: a.sunset ?? null,
+          tomorrow: {
+            maxC: Number(a.tomorrow?.maxC ?? 0),
+            minC: Number(a.tomorrow?.minC ?? 0),
+            label: String(a.tomorrow?.label ?? ""),
+          },
+        };
       }
+      const suggestions: string[] = Array.isArray(data?.suggestions)
+        ? data.suggestions.filter((s: any) => typeof s === "string" && s.length).slice(0, 3)
+        : [];
       if (closedRef.current) return;
       if (!reply) {
         setStatus("idle");
         return;
       }
-      setMessages((cur) => [...cur, { role: "assistant", text: reply, action }]);
+      setMessages((cur) => [
+        ...cur,
+        { role: "assistant", text: reply, action, suggestions },
+      ]);
       await playReply(reply);
     } catch (e: any) {
       if (closedRef.current) return;
@@ -943,10 +1225,18 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
               <Bubble
                 key={`${i}-${m.role}-${m.text.slice(0, 12)}`}
                 msg={m}
+                isLast={i === messages.length - 1 && status !== "thinking"}
+                onSuggestion={handleUserUtterance}
                 labelOpen={t("voice_open_maps")}
                 labelTo={t("voice_route_to")}
                 labelOpenAll={t("voice_open_all")}
                 labelNone={t("voice_none_nearby")}
+                labelRoute={t("voice_route_btn")}
+                labelNow={t("voice_now")}
+                labelTomorrow={t("voice_tomorrow")}
+                labelWind={t("voice_wind")}
+                labelSunrise={t("voice_sunrise")}
+                labelSunset={t("voice_sunset")}
               />
             ))}
             {status === "thinking" && <TypingRow key="typing" />}

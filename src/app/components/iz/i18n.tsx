@@ -244,6 +244,12 @@ export const STRINGS: Dict = {
     ru: "Рядом ничего не нашлось — попробуйте шире",
     kk: "Жақын маңда ештеңе табылмады",
   },
+  voice_route_btn: { en: "Route", ru: "Маршрут", kk: "Бағыт" },
+  voice_now: { en: "Now", ru: "Сейчас", kk: "Қазір" },
+  voice_tomorrow: { en: "Tomorrow", ru: "Завтра", kk: "Ертең" },
+  voice_wind: { en: "Wind", ru: "Ветер", kk: "Жел" },
+  voice_sunrise: { en: "Sunrise", ru: "Восход", kk: "Күн шығу" },
+  voice_sunset: { en: "Sunset", ru: "Закат", kk: "Күн бату" },
 };
 
 interface I18nCtx {

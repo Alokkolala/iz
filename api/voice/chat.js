@@ -1,4 +1,5 @@
 import OpenAI from 'openai'
+import { pickReferences } from '../../server/references.js'
 
 const client = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY,
@@ -107,25 +108,136 @@ function buildOSMEmbed(lat, lon, items) {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${minLon}%2C${minLat}%2C${maxLon}%2C${maxLat}&layer=mapnik&marker=${lat}%2C${lon}`
 }
 
-async function extractActions(text, location) {
-  if (!text) return { clean: '', action: null }
+const WEATHER_LABEL = {
+  0:  { en: 'Clear', ru: 'Ясно', kk: 'Ашық' },
+  1:  { en: 'Mostly clear', ru: 'В осн. ясно', kk: 'Негізінен ашық' },
+  2:  { en: 'Partly cloudy', ru: 'Облачно с прояснениями', kk: 'Бұлтты' },
+  3:  { en: 'Overcast', ru: 'Пасмурно', kk: 'Тұманды' },
+  45: { en: 'Fog', ru: 'Туман', kk: 'Тұман' },
+  48: { en: 'Icy fog', ru: 'Ледяной туман', kk: 'Мұзды тұман' },
+  51: { en: 'Light drizzle', ru: 'Лёгкая морось', kk: 'Жеңіл нөсер' },
+  53: { en: 'Drizzle', ru: 'Морось', kk: 'Нөсер' },
+  55: { en: 'Heavy drizzle', ru: 'Сильная морось', kk: 'Қатты нөсер' },
+  61: { en: 'Light rain', ru: 'Небольшой дождь', kk: 'Жеңіл жаңбыр' },
+  63: { en: 'Rain', ru: 'Дождь', kk: 'Жаңбыр' },
+  65: { en: 'Heavy rain', ru: 'Сильный дождь', kk: 'Қатты жаңбыр' },
+  71: { en: 'Light snow', ru: 'Небольшой снег', kk: 'Жеңіл қар' },
+  73: { en: 'Snow', ru: 'Снег', kk: 'Қар' },
+  75: { en: 'Heavy snow', ru: 'Сильный снег', kk: 'Қатты қар' },
+  80: { en: 'Showers', ru: 'Ливни', kk: 'Нөсер' },
+  81: { en: 'Heavy showers', ru: 'Сильные ливни', kk: 'Қатты нөсер' },
+  82: { en: 'Violent showers', ru: 'Шквалистые ливни', kk: 'Дауылды нөсер' },
+  95: { en: 'Thunderstorm', ru: 'Гроза', kk: 'Найзағай' },
+}
+function weatherLabel(code, L) {
+  const row = WEATHER_LABEL[code] || WEATHER_LABEL[0]
+  return row[L] || row.en
+}
+async function fetchWeather(lat, lon, L) {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code,wind_speed_10m&daily=sunrise,sunset,temperature_2m_max,temperature_2m_min,weather_code&forecast_days=2&timezone=auto`
+    const r = await fetch(url)
+    if (!r.ok) throw new Error(`open-meteo ${r.status}`)
+    const j = await r.json()
+    const c = j.current || {}
+    const d = j.daily || {}
+    return {
+      kind: 'weather',
+      origin: { lat, lon },
+      tempC: Math.round(c.temperature_2m ?? 0),
+      windKmh: Math.round(c.wind_speed_10m ?? 0),
+      code: c.weather_code ?? 0,
+      label: weatherLabel(c.weather_code ?? 0, L),
+      sunrise: (d.sunrise || [])[0] || null,
+      sunset: (d.sunset || [])[0] || null,
+      tomorrow: {
+        maxC: Math.round((d.temperature_2m_max || [])[1] ?? 0),
+        minC: Math.round((d.temperature_2m_min || [])[1] ?? 0),
+        label: weatherLabel((d.weather_code || [])[1] ?? 0, L),
+      },
+    }
+  } catch (err) {
+    console.warn('weather failed', err?.message)
+    return null
+  }
+}
+
+function scrubReply(s) {
+  if (!s) return ''
+  return s
+    .replace(/\[\[[^\]]+\]\]/g, '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\((?:https?:[^)]+|\/[^)]+)\)/g, '$1')
+    .replace(/\[(?:[a-z0-9.\-]+\.[a-z]{2,}(?:\/[^\]]*)?)\]/gi, '')
+    .replace(/\bhttps?:\/\/\S+/g, '')
+    .replace(/\bwww\.\S+/g, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/(^|[\s])\*([^*\n]+)\*/g, '$1$2')
+    .replace(/^\s*[-*•]\s+/gm, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\s+([.,!?;:])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+async function extractActions(text, location, L) {
+  if (!text) return { clean: '', action: null, suggestions: [] }
   let clean = text
   let action = null
+  let suggestions = []
+
+  const sugg = clean.match(/\[\[SUGG:\s*([^\]]+?)\s*\]\]/i)
+  if (sugg) {
+    clean = clean.replace(sugg[0], '').trim()
+    suggestions = sugg[1]
+      .split('|')
+      .map((s) => s.trim())
+      .filter((s) => s && s.length <= 36)
+      .slice(0, 3)
+  }
 
   const near = clean.match(/\[\[NEAR:\s*([a-z_]+)\s*\]\]/i)
   if (near && location) {
     const category = near[1].toLowerCase()
-    clean = clean.replace(near[0], '').replace(/\s{2,}/g, ' ').trim()
+    clean = clean.replace(near[0], '')
     const items = await searchOSMPlaces(category, location.lat, location.lon)
     const embedUrl = buildOSMEmbed(location.lat, location.lon, items)
     const listUrl = `https://www.google.com/maps/search/${encodeURIComponent(category)}/@${location.lat},${location.lon},13z`
     action = { kind: 'places', category, items, embedUrl, listUrl, origin: { lat: location.lat, lon: location.lon } }
   }
 
+  if (!action) {
+    const weather = clean.match(/\[\[WEATHER\]\]/i)
+    if (weather && location) {
+      clean = clean.replace(weather[0], '')
+      const w = await fetchWeather(location.lat, location.lon, L)
+      if (w) action = w
+    }
+  }
+
+  if (!action) {
+    const sight = clean.match(/\[\[SIGHT:\s*([a-z]+)\s*\]\]/i)
+    if (sight) {
+      const bucket = sight[1].toLowerCase()
+      clean = clean.replace(sight[0], '')
+      const photos = pickReferences(bucket, L).slice(0, 8)
+      if (photos.length) {
+        const mapsQuery = encodeURIComponent(`${bucket}, Mangystau, Kazakhstan`)
+        const origin =
+          location && Number.isFinite(location.lat) && Number.isFinite(location.lon)
+            ? `&origin=${location.lat},${location.lon}`
+            : ''
+        const routeUrl = `https://www.google.com/maps/dir/?api=1${origin}&destination=${mapsQuery}&travelmode=driving`
+        action = { kind: 'sight', bucket, photos, routeUrl }
+      }
+    }
+  }
+
   const go = clean.match(/\[\[GO:\s*([^\]]+?)\s*\]\]/i)
   if (go && !action) {
     let destination = go[1].trim()
-    clean = clean.replace(go[0], '').replace(/\s{2,}/g, ' ').trim()
+    clean = clean.replace(go[0], '')
     if (/-?\d+\.\d+\s*,\s*-?\d+\.\d+/.test(destination)) {
       destination = destination.replace(/-?\d+\.\d+\s*,\s*-?\d+\.\d+/g, '').trim()
     }
@@ -144,7 +256,31 @@ async function extractActions(text, location) {
     }
   }
 
-  return { clean, action }
+  return { clean: scrubReply(clean), action, suggestions }
+}
+
+const GREETING_RE = /^\s*(привет|здравствуй|здарова|здорово|hi|hey|hello|hola|салам|сәлем|salem|капля|kaplya|капелька|iz|из|йо|yo)[\s!.,?]*$/i
+const GREETINGS = {
+  en: [
+    "Hey — I'm Iz. I know Mangystau cold: canyons, salt flats, weird stone balls. What do you want to see?",
+    "Hi. Iz here, your local in Mangystau. Photo spots, food, sights — pick a thread.",
+    "Hey there. I can route you to Bozzhyra, find a cafe nearby, or pull the weather. Your call.",
+  ],
+  ru: [
+    "Привет, я Iz. Знаю Мангистау как свои пять — каньоны, солончаки, каменные шары. С чего начнём?",
+    "Здарова. Я твой местный по Мангистау. Места для фото, еда, маршруты — выбирай.",
+    "Привет. Могу проложить путь до Бозжыры, найти кафешку рядом или показать погоду. Что хочешь?",
+  ],
+  kk: [
+    "Сәлем, мен Iz. Маңғыстауды жақсы білемін — каньондар, тұзды жазықтар, тас шарлар. Қайдан бастаймыз?",
+    "Сәлем. Маңғыстаудағы жергіліктің — Iz. Фото орындар, тамақ, маршруттар — таңда.",
+    "Сәлем. Бозжыраға жол сала аламын, жанынан кафе іздей аламын немесе ауа райын көрсете аламын.",
+  ],
+}
+const GREETING_SUGGS = {
+  en: ["What's around me?", "Show me Bozzhyra", "Weather today"],
+  ru: ["Что рядом?", "Покажи Бозжыру", "Погода сегодня"],
+  kk: ["Жақын маңда не бар?", "Бозжыраны көрсет", "Бүгінгі ауа райы"],
 }
 
 export const config = {
@@ -166,40 +302,44 @@ export default async function handler(req, res) {
       location &&
       Number.isFinite(location.lat) &&
       Number.isFinite(location.lon)
+
+    const lastUser = Array.isArray(messages)
+      ? [...messages].reverse().find((m) => m?.role === 'user')?.content || ''
+      : ''
+    if (GREETING_RE.test(String(lastUser).trim())) {
+      const pool = GREETINGS[L]
+      const text = pool[Math.floor(Math.random() * pool.length)]
+      return res.json({ text, action: null, suggestions: GREETING_SUGGS[L] })
+    }
+
     const locLine = hasLoc
       ? `The user is right now at latitude ${location.lat.toFixed(4)}, longitude ${location.lon.toFixed(4)}${location.place ? ` (near ${location.place})` : ''}. Tailor distances, drive times and "what's nearby" to that.`
       : `You don't know where the user is. If a recommendation needs their location, ask once, briefly.`
 
-    const system = `You are Iz — a smart, friendly travel companion who knows Mangystau, Kazakhstan inside out. You sound like a close friend on a road trip, not a tour brochure.
-Speak entirely in ${langName}. No emojis, no markdown, no bullet lists.
+    const system = `You are Iz — a Mangystau local who knows the region cold. You're texting a traveler, not writing a brochure.
 
-You have three superpowers. Choose at most ONE marker per reply, never both.
-
-1. LIVE WEB SEARCH — use it freely for opening hours, current weather, road conditions, festivals, prices, news, or anything you're not sure about. Prefer fresh facts over guessing.
-
-2. NEARBY PLACES — when the user asks what's NEAR them, AROUND, "что рядом", "what's close", "где поесть/заправиться/остановиться" — end your reply with EXACTLY ONE of these markers on its own line:
-   [[NEAR:cafe]] [[NEAR:restaurant]] [[NEAR:fast_food]] [[NEAR:bar]]
-   [[NEAR:fuel]] [[NEAR:hotel]] [[NEAR:supermarket]] [[NEAR:pharmacy]]
-   [[NEAR:atm]] [[NEAR:parking]] [[NEAR:viewpoint]] [[NEAR:attraction]] [[NEAR:museum]]
-   The app will then show a real map with up to 6 actual nearby places.
-   When you emit a NEAR marker, DO NOT invent or list place names in your sentence — just say something tight like "here are the closest cafes" or "let's see what's around". The map and cards do the listing.
-
-3. DIRECTIONS — when the user wants to GO to one specific named place ("take me to Bozzhyra", "show me the route to Sherkala"), end with:
-   [[GO:<clean English place name only, e.g. "Bozzhyra Canyon">]]
-   NEVER put coordinates, numbers, "near", queries or category words inside [[GO:...]]. Only a real place name.
-
-Marker rules:
-- Never mention, quote, or read the marker out loud. It is invisible stage directions for the app.
-- Use NEAR when the answer is "many options around here". Use GO only for a single specific destination.
-- If neither fits, no marker.
-
-How to talk:
-- Answer the user's actual question first, directly, in 1–3 short sentences.
-- Use contractions and casual phrasing. Match their energy.
-- Travel and Mangystau are your wheelhouse, but you can answer general questions too — just keep replies tight.
-- If you searched the web, weave the fact in naturally (e.g. "looks like it's open till 8").
-- If you genuinely don't know, say so in one sentence.
+VOICE RULES (these are absolute):
+- Reply in ${langName}.
+- Maximum TWO short sentences. Aim for one. Never three.
+- No emojis. No markdown. No bullet points. No URLs. No bracketed citations like "[domain.com]". No site names.
+- Use contractions and warm, casual phrasing. Match the traveler's energy.
+- NEVER explain what a word means in general. Assume they're a tourist in Mangystau asking about Mangystau.
+- If you genuinely don't know, say so in one sentence — don't invent.
 - ${locLine}
+
+CARDS DO THE SHOWING. You only narrate; the app renders the rich card. End your reply with EXACTLY ONE marker (or none). Markers are invisible stage directions — never read them aloud, never mention them, never list place names if you're using a card marker.
+
+[[NEAR:<category>]] — user asks "what's nearby / around / close": cafe, restaurant, fast_food, bar, fuel, hotel, supermarket, pharmacy, atm, parking, viewpoint, attraction, museum. Say something tight like "here's what's around" — the map shows the places.
+
+[[SIGHT:<bucket>]] — user wants to learn about or see a specific Mangystau landmark. Buckets: bozzhyra, sherkala, tuzbair, kyzylkup, torysh, caspian. Say one tight line like "Bozzhyra is unreal at golden hour — look" — the card shows real photos.
+
+[[GO:<clean English place name>]] — user wants the ROUTE to one specific named place. Never coordinates, never categories. Just the name (e.g. "Bozzhyra Canyon", "Sherkala Mountain").
+
+[[WEATHER]] — user asks about weather / погода / ауа райы / temperature / "will it rain". Say one tight line like "let me pull it up" — the card shows current conditions and tomorrow.
+
+NO MARKER if it's a general chat question. Just answer in one warm sentence.
+
+SUGGESTIONS — ALWAYS end your reply with [[SUGG:a|b|c]] containing three short follow-up taps the user might want next, each ≤30 chars, in ${langName}. Make them concrete and different from each other. Example: [[SUGG:Какая погода?|Что рядом?|Покажи Шеркалу]]
 
 ${SIGHT_CONTEXT}`
 
@@ -211,15 +351,15 @@ ${SIGHT_CONTEXT}`
       : []
 
     const completion = await client.chat.completions.create({
-      model: 'google/gemini-2.5-flash-lite:online',
+      model: 'google/gemini-2.5-flash-lite',
       messages: [{ role: 'system', content: system }, ...history],
-      max_tokens: 320,
-      temperature: 0.7,
+      max_tokens: 220,
+      temperature: 0.6,
     })
 
     const raw = completion.choices[0]?.message?.content?.trim() ?? ''
-    const { clean, action } = await extractActions(raw, hasLoc ? location : null)
-    res.json({ text: clean, action })
+    const { clean, action, suggestions } = await extractActions(raw, hasLoc ? location : null, L)
+    res.json({ text: clean, action, suggestions })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: err?.message ?? 'voice chat failed' })
