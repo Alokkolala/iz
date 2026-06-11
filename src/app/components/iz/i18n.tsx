@@ -235,6 +235,9 @@ export const STRINGS: Dict = {
   },
   voice_stop: { en: "Stop", ru: "Стоп", kk: "Тоқта" },
   voice_close: { en: "Close", ru: "Закрыть", kk: "Жабу" },
+  voice_open_maps: { en: "Open in Maps", ru: "Открыть в Картах", kk: "Картадан ашу" },
+  voice_route_to: { en: "Route to", ru: "Маршрут до", kk: "Бағыт:" },
+  voice_locating: { en: "Locating you…", ru: "Определяю вас…", kk: "Орныңызды табудамын…" },
 };
 
 interface I18nCtx {

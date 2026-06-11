@@ -30,7 +30,13 @@ const VoiceSphere = lazy(() => import("./VoiceSphere"));
  * Tap the bead at any time to interrupt the current step.
  */
 type Status = "idle" | "listening" | "thinking" | "speaking" | "error";
-type Msg = { role: "user" | "assistant"; text: string };
+type DirectionsAction = { kind: "directions"; destination: string; url: string };
+type Msg = {
+  role: "user" | "assistant";
+  text: string;
+  action?: DirectionsAction | null;
+};
+type UserLocation = { lat: number; lon: number; place?: string };
 
 /* ---- chat-bubble pieces (ported from ChatUI reference, tuned for the
  * dark voice-overlay backdrop) -------------------------------------------- */
@@ -48,7 +54,78 @@ function Avatar() {
   );
 }
 
-function Bubble({ msg }: { msg: Msg }) {
+function MapPinIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  );
+}
+
+function DirectionsCard({
+  action,
+  labelOpen,
+  labelTo,
+}: {
+  action: DirectionsAction;
+  labelOpen: string;
+  labelTo: string;
+}) {
+  return (
+    <a
+      href={action.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-2 inline-flex items-center gap-2 rounded-2xl px-3.5 py-2 transition-transform active:scale-95"
+      style={{
+        background: "var(--iz-accent)",
+        color: "var(--iz-on-accent)",
+        boxShadow: "0 6px 22px rgba(46,230,201,0.32)",
+        fontSize: 13,
+        fontWeight: 600,
+        lineHeight: 1.2,
+        textDecoration: "none",
+      }}
+    >
+      <MapPinIcon size={14} />
+      <span style={{ opacity: 0.85 }}>{labelTo}</span>
+      <span>{action.destination}</span>
+      <span
+        aria-hidden
+        style={{
+          marginLeft: 4,
+          paddingLeft: 8,
+          borderLeft: "1px solid rgba(0,0,0,0.18)",
+          opacity: 0.9,
+          fontWeight: 500,
+        }}
+      >
+        {labelOpen} ↗
+      </span>
+    </a>
+  );
+}
+
+function Bubble({
+  msg,
+  labelOpen,
+  labelTo,
+}: {
+  msg: Msg;
+  labelOpen: string;
+  labelTo: string;
+}) {
   if (msg.role === "user") {
     return (
       <motion.div
@@ -83,17 +160,26 @@ function Bubble({ msg }: { msg: Msg }) {
       className="flex items-end gap-2"
     >
       <Avatar />
-      <div
-        className="max-w-[82%] rounded-2xl rounded-bl-md px-3.5 py-2 backdrop-blur-xl"
-        style={{
-          background: "rgba(255,255,255,0.12)",
-          border: "1px solid rgba(255,255,255,0.18)",
-          color: "#fff",
-          fontSize: 14,
-          lineHeight: 1.45,
-        }}
-      >
-        {msg.text}
+      <div className="flex max-w-[82%] flex-col items-start">
+        <div
+          className="rounded-2xl rounded-bl-md px-3.5 py-2 backdrop-blur-xl"
+          style={{
+            background: "rgba(255,255,255,0.12)",
+            border: "1px solid rgba(255,255,255,0.18)",
+            color: "#fff",
+            fontSize: 14,
+            lineHeight: 1.45,
+          }}
+        >
+          {msg.text}
+        </div>
+        {msg.action?.kind === "directions" && (
+          <DirectionsCard
+            action={msg.action}
+            labelOpen={labelOpen}
+            labelTo={labelTo}
+          />
+        )}
       </div>
     </motion.div>
   );
@@ -145,6 +231,7 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
   const [status, setStatus] = useState<Status>("idle");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const locationRef = useRef<UserLocation | null>(null);
 
   // amplitude written 60×/s, read by the WebGL sphere — never via React state
   const amplitudeRef = useRef(0);
@@ -178,6 +265,29 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
   statusRef.current = status;
   messagesRef.current = messages;
   langRef.current = lang;
+
+  // ask the browser for the user's coordinates once. If they decline, we
+  // simply continue without — the LLM is told to ask for it when needed.
+  useEffect(() => {
+    if (!("geolocation" in navigator)) return;
+    let cancelled = false;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (cancelled) return;
+        locationRef.current = {
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+        };
+      },
+      () => {
+        /* denied / unavailable — silent */
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60_000 },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // auto-scroll the chat to the latest bubble whenever it grows or status flips
   useEffect(() => {
@@ -387,17 +497,26 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
         body: JSON.stringify({
           messages: next.map((m) => ({ role: m.role, content: m.text })),
           lang: langRef.current,
+          location: locationRef.current,
         }),
       });
       if (!res.ok) throw new Error("network");
       const data = await res.json();
       const reply: string = (data?.text || "").trim();
+      const action: DirectionsAction | null =
+        data?.action && data.action.kind === "directions" && data.action.url
+          ? {
+              kind: "directions",
+              destination: String(data.action.destination ?? ""),
+              url: String(data.action.url),
+            }
+          : null;
       if (closedRef.current) return;
       if (!reply) {
         setStatus("idle");
         return;
       }
-      setMessages((cur) => [...cur, { role: "assistant", text: reply }]);
+      setMessages((cur) => [...cur, { role: "assistant", text: reply, action }]);
       await playReply(reply);
     } catch (e: any) {
       if (closedRef.current) return;
@@ -641,7 +760,12 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
         <div className="mx-auto flex max-w-[360px] flex-col gap-3">
           <AnimatePresence initial={false}>
             {messages.map((m, i) => (
-              <Bubble key={`${i}-${m.role}-${m.text.slice(0, 12)}`} msg={m} />
+              <Bubble
+                key={`${i}-${m.role}-${m.text.slice(0, 12)}`}
+                msg={m}
+                labelOpen={t("voice_open_maps")}
+                labelTo={t("voice_route_to")}
+              />
             ))}
             {status === "thinking" && <TypingRow key="typing" />}
           </AnimatePresence>
