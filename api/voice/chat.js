@@ -314,7 +314,7 @@ const NEAR_KEYWORDS = [
   { cat: 'bank',         needles: /банк[^о]|\bbank\b|обмен валют|exchange office/i },
   { cat: 'hospital',     needles: /больниц|госпитал|скорая|клиник|hospital|clinic|emergency room/i },
   { cat: 'parking',      needles: /парковк|parking|park the car/i },
-  { cat: 'mall',         needles: /\bтц\b|торгов.{0,4}центр|молл|mall|shopping(?: center| centre)?|трц/i },
+  { cat: 'mall',         needles: /(?:^|[^а-яё])тц(?=$|[^а-яё])|торгов.{0,4}центр|молл|mall|shopping(?: center| centre)?|трц/i },
   { cat: 'marketplace',  needles: /базар|рынок|market(?:place)?/i },
   { cat: 'mosque',       needles: /мечет|mosque|namaz|намаз/i },
   { cat: 'supermarket',  needles: /магазин|supermarket|grocery|продукт/i },
