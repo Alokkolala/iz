@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { Home, Users, Aperture, Compass, User, type IconProps } from "./Icons";
+import { Home, Users, Aperture, User, type IconProps } from "./Icons";
 import type { TabId } from "./types";
 import { useI18n, STRINGS } from "./i18n";
 
@@ -12,7 +12,6 @@ const tabs: { id: TabId; key: keyof typeof STRINGS; Icon: (p: IconProps) => JSX.
   { id: "pulse", key: "nav_pulse", Icon: Home },
   { id: "crew", key: "nav_crew", Icon: Users },
   { id: "lens", key: "nav_lens", Icon: Aperture },
-  { id: "quests", key: "nav_quests", Icon: Compass },
   { id: "profile", key: "nav_profile", Icon: User },
 ];
 

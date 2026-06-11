@@ -4,7 +4,6 @@ import { BottomNav } from "./BottomNav";
 import { TouristPulse } from "./TouristPulse";
 import { CrewMap } from "./CrewMap";
 import { ViralShotAssistant } from "./ViralShotAssistant";
-import { QuestTrail } from "./QuestTrail";
 import { ProfileMini } from "./ProfileMini";
 import type { TabId } from "./types";
 
@@ -19,8 +18,6 @@ export function AppShell() {
         return <CrewMap />;
       case "lens":
         return <ViralShotAssistant />;
-      case "quests":
-        return <QuestTrail />;
       case "profile":
         return <ProfileMini />;
     }

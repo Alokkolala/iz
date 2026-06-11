@@ -178,8 +178,10 @@ export const STRINGS: Dict = {
   nav_pulse: { en: "Home", ru: "Главная", kk: "Басты" },
   nav_crew: { en: "Crew", ru: "Команда", kk: "Команда" },
   nav_lens: { en: "Lens", ru: "Линза", kk: "Линза" },
-  nav_quests: { en: "Quests", ru: "Задания", kk: "Тапсырма" },
   nav_profile: { en: "Profile", ru: "Профиль", kk: "Профиль" },
+
+  // auth
+  sign_out: { en: "Sign out", ru: "Выйти", kk: "Шығу" },
 };
 
 interface I18nCtx {

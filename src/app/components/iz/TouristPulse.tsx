@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { motion } from "motion/react";
-import { Camera, MapPin, Compass, Sun, ArrowRight, ArrowUpRight } from "./Icons";
+import { Camera, MapPin, Sun, ArrowRight, ArrowUpRight } from "./Icons";
 import { Stone3D } from "./Stone3D";
 import { Card, Button, IconChip, Overline } from "./ui";
 import { ImageWithFallback } from "../figma/ImageWithFallback";
@@ -23,15 +23,14 @@ const PHOTO_TUZBAIR = "https://images.unsplash.com/photo-1775484866877-3e55f1f44
 
 export function TouristPulse({ onNavigate }: TouristPulseProps) {
   const { t } = useI18n();
-  const { name, shots, spots, completedQuests } = useStore();
+  const { name, shots, spots } = useStore();
   const golden = useMemo(() => goldenHour(), []);
 
   const journey = [
     { label: t("shots"), value: shots, Icon: Camera },
     { label: t("spots"), value: spots, Icon: MapPin },
-    { label: t("quests_done_short"), value: completedQuests, Icon: Compass },
   ];
-  const hasJourney = shots > 0 || spots > 0 || completedQuests > 0;
+  const hasJourney = shots > 0 || spots > 0;
   const trending = [
     { src: PHOTO_BAY, name: t("spot_blue") },
     { src: PHOTO_TUZBAIR, name: t("spot_tuzbair") },
@@ -90,7 +89,7 @@ export function TouristPulse({ onNavigate }: TouristPulseProps) {
       {/* Your journey */}
       <div>
         <Overline className="mb-3">{t("your_journey")}</Overline>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           {journey.map((s, i) => (
             <motion.div key={s.label} {...rise(i + 2)}>
               <Card className="flex flex-col items-center gap-2 p-3.5">

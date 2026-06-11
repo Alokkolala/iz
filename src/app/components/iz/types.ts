@@ -1,1 +1,1 @@
-export type TabId = "pulse" | "crew" | "lens" | "quests" | "profile";
+export type TabId = "pulse" | "crew" | "lens" | "profile";

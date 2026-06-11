@@ -1,16 +1,18 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { MapPin, Camera, Footprints, Shell, Camera as Cam, Compass, Check } from "./Icons";
+import { MapPin, Camera, Footprints, Camera as Cam, Check } from "./Icons";
 import { Card, Button, IconChip, Overline } from "./ui";
 import { useI18n } from "./i18n";
 import { LangSwitcher } from "./LangSwitcher";
 import { useStore, relativeTime } from "./store";
+import { useAuth } from "../../../lib/AuthProvider";
 
 const ease = [0.16, 1, 0.3, 1] as const;
 
 export function ProfileMini() {
   const { t } = useI18n();
-  const { name, setName, initialsOf, traces, shots, spots, completedQuests, quests } = useStore();
+  const { name, setName, initialsOf, traces, shots, spots } = useStore();
+  const { user, signOut } = useAuth();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
 
@@ -23,8 +25,6 @@ export function ProfileMini() {
   ];
   const allBadges = [
     { name: t("badge_creator"), Icon: Cam, earned: shots >= 3 },
-    { name: t("badge_scout"), Icon: Compass, earned: completedQuests >= 2 },
-    { name: t("badge_hunter"), Icon: Shell, earned: (quests["2"] ?? 0) >= 100 },
   ];
   const badges = allBadges.filter((b) => b.earned);
 
@@ -53,6 +53,11 @@ export function ProfileMini() {
             <button onClick={() => { setDraft(name); setEditing(true); }} className="block text-left focus-visible:outline-none">
               <p style={{ fontSize: 19, fontWeight: 700, color: "var(--iz-ink)" }}>{name || t("tap_to_name")}</p>
               <p style={{ fontSize: 13, color: "var(--iz-ink-3)" }}>{t("explorer")}</p>
+              {user?.email && (
+                <p className="truncate" style={{ fontSize: 12, color: "var(--iz-ink-3)", marginTop: 2 }}>
+                  {user.email}
+                </p>
+              )}
             </button>
           )}
         </div>
@@ -106,6 +111,16 @@ export function ProfileMini() {
           </Card>
         )}
       </div>
+
+      {/* Sign out */}
+      <Button
+        variant="ghost"
+        onClick={signOut}
+        className="mt-2 w-full"
+        style={{ color: "var(--iz-ink-3)" }}
+      >
+        {t("sign_out")}
+      </Button>
     </div>
   );
 }

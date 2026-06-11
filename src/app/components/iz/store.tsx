@@ -10,7 +10,7 @@ import {
 export interface Trace {
   id: string;
   place: string;
-  kind: "shot" | "quest" | "meet";
+  kind: "shot" | "meet";
   time: number; // epoch ms
 }
 
@@ -27,7 +27,6 @@ interface Persisted {
   name: string;
   shots: number;
   traces: Trace[];
-  quests: Record<string, number>;
   crew: Member[];
   meetPoint: { x: number; y: number } | null;
 }
@@ -41,7 +40,6 @@ const DEFAULT: Persisted = {
   name: "",
   shots: 0,
   traces: [],
-  quests: { "1": 0, "2": 0, "3": 0, "4": 0 },
   crew: [],
   meetPoint: null,
 };
@@ -68,12 +66,10 @@ function uid() {
 
 interface Store extends Persisted {
   spots: number;
-  completedQuests: number;
   initialsOf: (name: string) => string;
   // actions
   setName: (name: string) => void;
   addShot: (place: string) => void;
-  bumpQuest: (id: string, label: string) => number; // returns new progress
   addMember: (name: string) => void;
   removeMember: (id: string) => void;
   setMeetPoint: (p: { x: number; y: number } | null) => void;
@@ -113,14 +109,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const bumpQuest = (id: string, label: string) => {
-    const current = state.quests[id] ?? 0;
-    const next = Math.min(100, current + 25);
-    setState((s) => ({ ...s, quests: { ...s.quests, [id]: next } }));
-    if (next === 100 && current < 100) addTrace(label, "quest");
-    return next;
-  };
-
   const addMember = (name: string) => {
     if (!name.trim()) return;
     setState((s) => ({
@@ -150,19 +138,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const reset = () => setState(DEFAULT);
 
   const spots = useMemo(() => new Set(state.traces.map((tr) => tr.place)).size, [state.traces]);
-  const completedQuests = useMemo(
-    () => Object.values(state.quests).filter((p) => p >= 100).length,
-    [state.quests],
-  );
 
   const value: Store = {
     ...state,
     spots,
-    completedQuests,
     initialsOf: initials,
     setName,
     addShot,
-    bumpQuest,
     addMember,
     removeMember,
     setMeetPoint,
