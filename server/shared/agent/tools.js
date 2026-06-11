@@ -1,6 +1,7 @@
 import { pickReferences } from '../../references.js'
 import { saveFact } from './memory.js'
 import { buildOSMEmbed, fetchWeather, searchOSMPlaces } from '../voice-primitives.js'
+import { searchWeb } from './tools/web-search.js'
 
 export const TOOL_SCHEMA = [
   {
@@ -75,6 +76,20 @@ export const TOOL_SCHEMA = [
         properties: {
           mood: { type: 'string', description: 'Optional: photo, family, active, lazy.' },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: 'Search the live web for current information: news, opening hours, prices, events, anything outside Mangystau curated data. Returns title + url + snippet for top results.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query. Be specific.' },
+        },
+        required: ['query'],
       },
     },
   },
@@ -197,6 +212,20 @@ export async function dispatchTool(name, args, ctx) {
         sight: caspianPhotos.map((p) => p.tip),
         food: (food.length ? food.slice(0, 3) : fallbackItems('food')).map((i) => i.name),
         view: (viewpoint.length ? viewpoint.slice(0, 2) : fallbackItems('view')).map((i) => i.name),
+      },
+    }
+  }
+
+  if (name === 'web_search') {
+    const query = String(args?.query || '').slice(0, 200)
+    if (!query) return { toolResult: { error: 'missing_query' } }
+    const items = await withTimeout(searchWeb(query, 5), 8000, [])
+    return {
+      display: { kind: 'web_results', query, items },
+      toolResult: {
+        query,
+        count: items.length,
+        results: items.map((r) => ({ title: r.title, snippet: r.snippet, url: r.url })),
       },
     }
   }

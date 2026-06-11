@@ -253,6 +253,7 @@ export const STRINGS: Dict = {
   voice_sunset: { en: "Sunset", ru: "Закат", kk: "Күн бату" },
   voice_compose_placeholder: { en: "Ask anything…", ru: "Спроси что угодно…", kk: "Не болса да сұра…" },
   voice_send: { en: "Send", ru: "Отправить", kk: "Жіберу" },
+  voice_web_results: { en: "Web results", ru: "Из интернета", kk: "Интернеттен" },
 };
 
 interface I18nCtx {

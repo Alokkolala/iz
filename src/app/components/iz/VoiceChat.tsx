@@ -72,7 +72,9 @@ type PlanAction = {
   origin: { lat: number; lon: number };
   blocks: { label: "sight" | "food" | "view"; items: Array<{ name?: string; tip?: string }> }[];
 };
-type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction | PlanAction;
+type WebResult = { title: string; url: string; snippet: string };
+type WebResultsAction = { kind: "web_results"; query: string; items: WebResult[] };
+type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction | PlanAction | WebResultsAction;
 type Msg = {
   role: "user" | "assistant";
   text: string;
@@ -629,6 +631,58 @@ function PlanCard({ action }: { action: PlanAction }) {
   );
 }
 
+function WebResultsCard({ action, label }: { action: WebResultsAction; label: string }) {
+  if (!action.items.length) return null;
+  return (
+    <div
+      className="mt-2 w-full max-w-[320px] overflow-hidden rounded-2xl"
+      style={{
+        background: "rgba(255,255,255,0.08)",
+        border: "1px solid rgba(255,255,255,0.16)",
+        backdropFilter: "blur(14px)",
+        WebkitBackdropFilter: "blur(14px)",
+      }}
+    >
+      <div
+        className="px-3 py-2 uppercase"
+        style={{
+          fontSize: 10,
+          letterSpacing: "0.12em",
+          color: "rgba(94,234,212,0.86)",
+          fontWeight: 700,
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
+        }}
+      >
+        {label} · {action.query}
+      </div>
+      <div className="flex flex-col">
+        {action.items.map((r, i) => (
+          <a
+            key={i}
+            href={r.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-2"
+            style={{
+              borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
+              color: "#fff",
+              textDecoration: "none",
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{r.title}</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", lineHeight: 1.35, marginTop: 2 }}>
+              {r.snippet}
+            </div>
+            <div style={{ fontSize: 10, color: "var(--iz-accent)", marginTop: 4 }}>
+              {new URL(r.url).hostname.replace(/^www\./, "")} ↗
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Bubble({
   msg,
   isLast,
@@ -643,6 +697,7 @@ function Bubble({
   labelWind,
   labelSunrise,
   labelSunset,
+  labelWebResults,
 }: {
   msg: Msg;
   isLast: boolean;
@@ -657,6 +712,7 @@ function Bubble({
   labelWind: string;
   labelSunrise: string;
   labelSunset: string;
+  labelWebResults: string;
 }) {
   if (msg.role === "user") {
     return (
@@ -734,6 +790,9 @@ function Bubble({
           />
         )}
         {msg.action?.kind === "plan" && <PlanCard action={msg.action} />}
+        {msg.action?.kind === "web_results" && (
+          <WebResultsCard action={msg.action} label={labelWebResults} />
+        )}
         {isLast && msg.suggestions && msg.suggestions.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {msg.suggestions.map((s, i) => (
@@ -1250,6 +1309,18 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
               })),
             })),
         };
+      } else if (a && a.kind === "web_results" && Array.isArray(a.items)) {
+        action = {
+          kind: "web_results",
+          query: String(a.query ?? ""),
+          items: a.items
+            .filter((r: any) => r && typeof r.url === "string" && typeof r.title === "string")
+            .map((r: any) => ({
+              title: String(r.title),
+              url: String(r.url),
+              snippet: String(r.snippet ?? ""),
+            })),
+        };
       }
       const suggestions: string[] = Array.isArray(data?.suggestions)
         ? data.suggestions.filter((s: any) => typeof s === "string" && s.length).slice(0, 3)
@@ -1512,6 +1583,7 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
                 labelWind={t("voice_wind")}
                 labelSunrise={t("voice_sunrise")}
                 labelSunset={t("voice_sunset")}
+                labelWebResults={t("voice_web_results")}
               />
             ))}
             {status === "thinking" && <TypingRow key="typing" />}
