@@ -81,7 +81,23 @@ type RouteAction = {
   stops: RouteStop[];
   origin: { lat: number; lon: number } | null;
 };
-type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction | PlanAction | WebResultsAction | RouteAction;
+type RecommendItem = {
+  type: "sight" | "food" | "view";
+  title: string;
+  reason: string;
+  photo?: string | null;
+  url?: string;
+  action?: { kind: "show_sight"; bucket: string };
+};
+type RecommendAction = {
+  kind: "recommend";
+  mood: string | null;
+  timeOfDay: string;
+  weatherNote: string | null;
+  factsApplied: string | null;
+  items: RecommendItem[];
+};
+type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction | PlanAction | WebResultsAction | RouteAction | RecommendAction;
 type Msg = {
   role: "user" | "assistant";
   text: string;
@@ -788,6 +804,133 @@ function RouteCard({
   );
 }
 
+function RecommendCard({
+  action,
+  label,
+  onPickSight,
+}: {
+  action: RecommendAction;
+  label: string;
+  onPickSight: (bucket: string) => void;
+}) {
+  return (
+    <div
+      className="mt-2 w-full max-w-[320px] overflow-hidden rounded-2xl"
+      style={{
+        background: "rgba(255,255,255,0.08)",
+        border: "1px solid rgba(255,255,255,0.16)",
+        backdropFilter: "blur(14px)",
+        WebkitBackdropFilter: "blur(14px)",
+      }}
+    >
+      <div
+        className="flex items-center justify-between px-3 py-2"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
+      >
+        <div
+          className="uppercase"
+          style={{
+            fontSize: 10,
+            letterSpacing: "0.12em",
+            color: "rgba(94,234,212,0.86)",
+            fontWeight: 700,
+          }}
+        >
+          {label}
+        </div>
+        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)" }}>
+          {action.timeOfDay}
+          {action.weatherNote ? ` · ${action.weatherNote}` : ""}
+        </div>
+      </div>
+      <div className="flex flex-col">
+        {action.items.map((item, i) => (
+          <div
+            key={`${item.type}-${i}`}
+            className="flex items-start gap-2 px-3 py-2"
+            style={{
+              borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.08)",
+              color: "#fff",
+            }}
+          >
+            {item.photo ? (
+              <img
+                src={item.photo}
+                alt={item.title}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 12,
+                  objectFit: "cover",
+                  flexShrink: 0,
+                }}
+              />
+            ) : (
+              <div
+                aria-hidden
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 12,
+                  background: "rgba(255,255,255,0.06)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 22,
+                  flexShrink: 0,
+                }}
+              >
+                {item.type === "food" ? "🍽" : item.type === "view" ? "🌄" : "📸"}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{item.title}</div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", lineHeight: 1.35, marginTop: 2 }}>
+                {item.reason}
+              </div>
+              {item.action?.kind === "show_sight" && (
+                <button
+                  onClick={() => onPickSight(item.action!.bucket)}
+                  className="mt-1 rounded-full px-2.5 py-1"
+                  style={{
+                    background: "rgba(45,212,191,0.18)",
+                    border: "1px solid rgba(45,212,191,0.5)",
+                    color: "#5eead4",
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}
+                >
+                  Show me
+                </button>
+              )}
+              {item.url && (
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 inline-block rounded-full px-2.5 py-1"
+                  style={{
+                    background: "rgba(255,255,255,0.10)",
+                    border: "1px solid rgba(255,255,255,0.22)",
+                    color: "#fff",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    textDecoration: "none",
+                  }}
+                >
+                  Open ↗
+                </a>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Bubble({
   msg,
   isLast,
@@ -805,6 +948,7 @@ function Bubble({
   labelWebResults,
   labelRouteStops,
   labelOpenRoute,
+  labelRecommendations,
 }: {
   msg: Msg;
   isLast: boolean;
@@ -822,6 +966,7 @@ function Bubble({
   labelWebResults: string;
   labelRouteStops: string;
   labelOpenRoute: string;
+  labelRecommendations: string;
 }) {
   if (msg.role === "user") {
     return (
@@ -907,6 +1052,13 @@ function Bubble({
             action={msg.action}
             labelStops={labelRouteStops}
             labelOpen={labelOpenRoute}
+          />
+        )}
+        {msg.action?.kind === "recommend" && (
+          <RecommendCard
+            action={msg.action}
+            label={labelRecommendations}
+            onPickSight={(bucket) => onSuggestion(`Show me ${bucket}`)}
           />
         )}
         {isLast && msg.suggestions && msg.suggestions.length > 0 && (
@@ -1451,6 +1603,26 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
               lon: Number(s.lon),
             })),
         };
+      } else if (a && a.kind === "recommend" && Array.isArray(a.items)) {
+        action = {
+          kind: "recommend",
+          mood: typeof a.mood === "string" ? a.mood : null,
+          timeOfDay: String(a.timeOfDay ?? ""),
+          weatherNote: a.weatherNote ? String(a.weatherNote) : null,
+          factsApplied: a.factsApplied ? String(a.factsApplied) : null,
+          items: a.items
+            .filter((i: any) => i && typeof i.title === "string")
+            .map((i: any) => ({
+              type: i.type === "food" || i.type === "view" ? i.type : "sight",
+              title: String(i.title),
+              reason: String(i.reason ?? ""),
+              photo: typeof i.photo === "string" ? i.photo : null,
+              url: typeof i.url === "string" ? i.url : undefined,
+              action: i.action?.kind === "show_sight" && typeof i.action.bucket === "string"
+                ? { kind: "show_sight" as const, bucket: String(i.action.bucket) }
+                : undefined,
+            })),
+        };
       }
       const suggestions: string[] = Array.isArray(data?.suggestions)
         ? data.suggestions.filter((s: any) => typeof s === "string" && s.length).slice(0, 3)
@@ -1716,6 +1888,7 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
                 labelWebResults={t("voice_web_results")}
                 labelRouteStops={t("voice_route_stops")}
                 labelOpenRoute={t("voice_open_route")}
+                labelRecommendations={t("voice_recommendations")}
               />
             ))}
             {status === "thinking" && <TypingRow key="typing" />}

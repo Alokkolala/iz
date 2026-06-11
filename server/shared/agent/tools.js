@@ -3,6 +3,7 @@ import { saveFact } from './memory.js'
 import { buildOSMEmbed, fetchWeather, searchOSMPlaces } from '../voice-primitives.js'
 import { searchWeb } from './tools/web-search.js'
 import { buildMultiStopRoute } from './tools/route.js'
+import { buildRecommendations } from './tools/recommend.js'
 
 export const TOOL_SCHEMA = [
   {
@@ -109,6 +110,19 @@ export const TOOL_SCHEMA = [
           },
         },
         required: ['stops'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'recommend',
+      description: 'Proactive personalised recommendations: combines time of day, weather, user memory, and nearby places. Use for "what should I do", "recommend me", "surprise me".',
+      parameters: {
+        type: 'object',
+        properties: {
+          mood: { type: 'string', description: 'Optional mood: photo, family, active, lazy, foodie, golden_hour.' },
+        },
       },
     },
   },
@@ -258,6 +272,26 @@ export async function dispatchTool(name, args, ctx) {
       toolResult: {
         url: result.url,
         stops: result.stops.map((s) => s.name),
+      },
+    }
+  }
+
+  if (name === 'recommend') {
+    const mood = args?.mood ? String(args.mood).slice(0, 40) : null
+    const rec = await buildRecommendations({
+      location: loc,
+      mood,
+      userId: ctx.userId,
+      lang: L,
+    })
+    if (!rec) return { toolResult: { error: 'no_location' } }
+    return {
+      display: { kind: 'recommend', ...rec },
+      toolResult: {
+        timeOfDay: rec.timeOfDay,
+        weatherNote: rec.weatherNote,
+        factsApplied: rec.factsApplied,
+        picks: rec.items.map((i) => ({ type: i.type, title: i.title })),
       },
     }
   }
