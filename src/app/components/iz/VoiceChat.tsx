@@ -6,18 +6,27 @@ import { X } from "./Icons";
 const VoiceSphere = lazy(() => import("./VoiceSphere"));
 
 /**
- * Iz voice chat — Web Speech API (free, in-browser) for STT and TTS, OpenRouter
- * for the LLM via /api/voice/chat. The water bead in the centre breathes with
- * live audio amplitude (mic when listening, procedural shimmer when speaking)
- * so the avatar feels like it's actually in the conversation.
+ * Iz voice chat.
+ *   STT  : browser Web Speech API (free)
+ *   LLM  : OpenRouter (google/gemini-2.5-flash-lite) via /api/voice/chat
+ *   TTS  : OpenRouter /api/v1/audio/speech (openai/gpt-4o-mini-tts) via
+ *          /api/voice/tts — streamed back as MP3.
  *
- * State machine:
- *   idle  → user taps bead → listening
- *   listening → final transcript → thinking (POST)
- *   thinking → reply text → speaking (TTS)
- *   speaking → utterance end → listening (auto turn-taking)
+ * Audio plumbing
+ *   We share one AudioContext for the whole component. Mic uses a
+ *   MediaStreamAudioSourceNode; the TTS MP3 plays through a hidden <audio>
+ *   that's routed through a MediaElementAudioSourceNode → AnalyserNode →
+ *   destination. `analyserRef` is swapped between mic / TTS depending on
+ *   status — that's what makes the water bead breathe with the *actual*
+ *   voice instead of a synthesised shimmer.
  *
- * Tap the bead at any time to interrupt.
+ * State machine
+ *   idle → tap bead → listening → (final transcript)
+ *   → thinking (POST /api/voice/chat)
+ *   → speaking (TTS streams + plays)
+ *   → idle (auto-restart listening for natural turn-taking)
+ *
+ * Tap the bead at any time to interrupt the current step.
  */
 type Status = "idle" | "listening" | "thinking" | "speaking" | "error";
 type Msg = { role: "user" | "assistant"; text: string };
@@ -38,12 +47,28 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // refs that survive renders without re-triggering effects
+  // amplitude written 60×/s, read by the WebGL sphere — never via React state
   const amplitudeRef = useRef(0);
+
+  // STT
   const recognitionRef = useRef<any>(null);
+
+  // shared audio graph
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null); // currently active
+
+  // mic graph
   const micStreamRef = useRef<MediaStream | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+
+  // TTS graph (one element + one MediaElementSource, reused across replies)
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const ttsSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const ttsAnalyserRef = useRef<AnalyserNode | null>(null);
+  const ttsUrlRef = useRef<string | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
+
   const rafRef = useRef<number | null>(null);
   const statusRef = useRef<Status>("idle");
   const messagesRef = useRef<Msg[]>([]);
@@ -54,28 +79,28 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
   messagesRef.current = messages;
   langRef.current = lang;
 
-  // ---- audio amplitude loop (drives the sphere) -------------------------
+  // ---- amplitude polling loop (writes amplitudeRef each frame) ----------
   useEffect(() => {
     const tick = () => {
       const s = statusRef.current;
-      if (analyserRef.current && s === "listening") {
-        const buf = new Uint8Array(analyserRef.current.frequencyBinCount);
-        analyserRef.current.getByteTimeDomainData(buf);
+      const an = analyserRef.current;
+      if (an && (s === "listening" || s === "speaking")) {
+        const buf = new Uint8Array(an.frequencyBinCount);
+        an.getByteTimeDomainData(buf);
         let sum = 0;
         for (let i = 0; i < buf.length; i++) {
           const v = (buf[i] - 128) / 128;
           sum += v * v;
         }
         const rms = Math.sqrt(sum / buf.length);
-        amplitudeRef.current = Math.min(1, rms * 4);
-      } else if (s === "speaking") {
-        // SpeechSynthesis doesn't expose its output stream — synth a shimmer.
-        const tt = performance.now() / 1000;
-        amplitudeRef.current =
-          0.32 + 0.22 * Math.abs(Math.sin(tt * 4.1)) + 0.16 * Math.abs(Math.sin(tt * 7.3));
+        // mic is quieter than the TTS playback bus; tune separately
+        const gain = s === "speaking" ? 5 : 4;
+        const target = Math.min(1, rms * gain);
+        // light smoothing happens inside the sphere; here we just write raw
+        amplitudeRef.current = target;
       } else if (s === "thinking") {
         const tt = performance.now() / 1000;
-        amplitudeRef.current = 0.18 + 0.1 * Math.sin(tt * 2.4);
+        amplitudeRef.current = 0.18 + 0.08 * Math.sin(tt * 2.4);
       } else {
         amplitudeRef.current = Math.max(0, amplitudeRef.current * 0.9);
       }
@@ -93,51 +118,91 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
       closedRef.current = true;
       stopRecognition();
       stopMic();
+      stopPlayback();
+      ttsAbortRef.current?.abort();
       try {
-        window.speechSynthesis.cancel();
+        audioCtxRef.current?.close();
       } catch {}
+      audioCtxRef.current = null;
+      if (ttsUrlRef.current) {
+        URL.revokeObjectURL(ttsUrlRef.current);
+        ttsUrlRef.current = null;
+      }
     };
   }, []);
 
-  // some browsers populate voices async — trigger a load so they're ready
-  useEffect(() => {
-    try {
-      window.speechSynthesis.getVoices();
-    } catch {}
-  }, []);
+  // ---------------------------------------------------------------------
+  // audio graph helpers
+  // ---------------------------------------------------------------------
+  const ensureAudioCtx = (): AudioContext | null => {
+    if (!audioCtxRef.current) {
+      const AC: typeof AudioContext =
+        (window.AudioContext as typeof AudioContext) ||
+        ((window as any).webkitAudioContext as typeof AudioContext);
+      if (!AC) return null;
+      audioCtxRef.current = new AC();
+    }
+    if (audioCtxRef.current.state === "suspended") {
+      audioCtxRef.current.resume().catch(() => {});
+    }
+    return audioCtxRef.current;
+  };
 
+  const ensureTtsGraph = (): AnalyserNode | null => {
+    const ctx = ensureAudioCtx();
+    const el = audioElRef.current;
+    if (!ctx || !el) return null;
+    if (!ttsSourceRef.current) {
+      try {
+        const src = ctx.createMediaElementSource(el);
+        const an = ctx.createAnalyser();
+        an.fftSize = 1024;
+        src.connect(an);
+        an.connect(ctx.destination);
+        ttsSourceRef.current = src;
+        ttsAnalyserRef.current = an;
+      } catch {
+        // already attached for another context — fine
+      }
+    }
+    return ttsAnalyserRef.current;
+  };
+
+  // ---------------------------------------------------------------------
+  // mic / STT
+  // ---------------------------------------------------------------------
   const stopMic = () => {
+    try {
+      micSourceRef.current?.disconnect();
+    } catch {}
+    micSourceRef.current = null;
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach((tr) => tr.stop());
       micStreamRef.current = null;
     }
-    if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
-      audioCtxRef.current.close().catch(() => {});
-    }
-    audioCtxRef.current = null;
-    analyserRef.current = null;
+    if (analyserRef.current === micAnalyserRef.current) analyserRef.current = null;
+    micAnalyserRef.current = null;
   };
 
-  const startMic = async () => {
+  const startMic = async (): Promise<boolean> => {
     try {
+      const ctx = ensureAudioCtx();
+      if (!ctx) return false;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (closedRef.current) {
         stream.getTracks().forEach((tr) => tr.stop());
         return false;
       }
       micStreamRef.current = stream;
-      const AC: typeof AudioContext =
-        (window.AudioContext as typeof AudioContext) ||
-        ((window as any).webkitAudioContext as typeof AudioContext);
-      const ctx = new AC();
-      audioCtxRef.current = ctx;
       const src = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 1024;
-      src.connect(analyser);
-      analyserRef.current = analyser;
+      const an = ctx.createAnalyser();
+      an.fftSize = 1024;
+      src.connect(an);
+      micSourceRef.current = src;
+      micAnalyserRef.current = an;
+      analyserRef.current = an;
       return true;
-    } catch (e: any) {
+    } catch {
       setErrorMsg(t("voice_mic_denied"));
       return false;
     }
@@ -149,81 +214,6 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
     } catch {}
     recognitionRef.current = null;
   };
-
-  const handleUserUtterance = useCallback(
-    async (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) {
-        setStatus("idle");
-        return;
-      }
-      const next: Msg[] = [...messagesRef.current, { role: "user", text: trimmed }];
-      setMessages(next);
-      setStatus("thinking");
-      stopMic();
-
-      try {
-        const res = await fetch("/api/voice/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: next.map((m) => ({ role: m.role, content: m.text })),
-            lang: langRef.current,
-          }),
-        });
-        if (!res.ok) throw new Error("network");
-        const data = await res.json();
-        const reply: string = (data?.text || "").trim();
-        if (closedRef.current) return;
-        if (!reply) {
-          setStatus("idle");
-          return;
-        }
-        setMessages((cur) => [...cur, { role: "assistant", text: reply }]);
-        speakReply(reply);
-      } catch (e: any) {
-        if (closedRef.current) return;
-        setErrorMsg(e?.message || "error");
-        setStatus("idle");
-      }
-    },
-    []
-  );
-
-  const speakReply = useCallback((text: string) => {
-    try {
-      window.speechSynthesis.cancel();
-    } catch {}
-    const u = new SpeechSynthesisUtterance(text);
-    const wanted = LANG_TO_LOCALE[langRef.current];
-    u.lang = wanted;
-    // pick best matching voice; kk is often missing → fall back to ru
-    const voices = window.speechSynthesis.getVoices?.() || [];
-    const fallback = langRef.current === "kk" ? "ru-RU" : wanted;
-    const pick =
-      voices.find((v) => v.lang === wanted) ||
-      voices.find((v) => v.lang.startsWith(wanted.slice(0, 2))) ||
-      voices.find((v) => v.lang === fallback) ||
-      null;
-    if (pick) u.voice = pick;
-    u.rate = 1.02;
-    u.pitch = 1.0;
-    u.onstart = () => {
-      if (!closedRef.current) setStatus("speaking");
-    };
-    u.onend = () => {
-      if (closedRef.current) return;
-      setStatus("idle");
-      // keep the conversation flowing — auto reopen the mic shortly after
-      window.setTimeout(() => {
-        if (!closedRef.current && statusRef.current === "idle") startListening();
-      }, 380);
-    };
-    u.onerror = () => {
-      if (!closedRef.current) setStatus("idle");
-    };
-    window.speechSynthesis.speak(u);
-  }, []);
 
   const startListening = useCallback(async () => {
     if (closedRef.current) return;
@@ -267,9 +257,123 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
       setErrorMsg(String(e?.message ?? e));
       setStatus("idle");
     }
-  }, [handleUserUtterance, t]);
+  }, [t]);
 
+  // ---------------------------------------------------------------------
+  // LLM round-trip + TTS playback
+  // ---------------------------------------------------------------------
+  const handleUserUtterance = useCallback(async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setStatus("idle");
+      return;
+    }
+    const next: Msg[] = [...messagesRef.current, { role: "user", text: trimmed }];
+    setMessages(next);
+    setStatus("thinking");
+    stopMic();
+
+    try {
+      const res = await fetch("/api/voice/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: next.map((m) => ({ role: m.role, content: m.text })),
+          lang: langRef.current,
+        }),
+      });
+      if (!res.ok) throw new Error("network");
+      const data = await res.json();
+      const reply: string = (data?.text || "").trim();
+      if (closedRef.current) return;
+      if (!reply) {
+        setStatus("idle");
+        return;
+      }
+      setMessages((cur) => [...cur, { role: "assistant", text: reply }]);
+      await playReply(reply);
+    } catch (e: any) {
+      if (closedRef.current) return;
+      setErrorMsg(e?.message || "error");
+      setStatus("idle");
+    }
+  }, []);
+
+  const stopPlayback = () => {
+    const el = audioElRef.current;
+    if (el) {
+      try {
+        el.pause();
+        el.removeAttribute("src");
+        el.load();
+      } catch {}
+    }
+    if (analyserRef.current === ttsAnalyserRef.current) analyserRef.current = null;
+  };
+
+  const playReply = useCallback(async (text: string) => {
+    const el = audioElRef.current;
+    if (!el) {
+      setStatus("idle");
+      return;
+    }
+    // cancel any previous in-flight TTS
+    ttsAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    ttsAbortRef.current = ctrl;
+
+    try {
+      const res = await fetch("/api/voice/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, lang: langRef.current }),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`tts ${res.status}`);
+      const blob = await res.blob();
+      if (closedRef.current || ctrl.signal.aborted) return;
+
+      // swap to the new blob URL, revoking the previous one
+      const url = URL.createObjectURL(blob);
+      if (ttsUrlRef.current) URL.revokeObjectURL(ttsUrlRef.current);
+      ttsUrlRef.current = url;
+
+      // make sure the audio graph is wired before play (autoplay-safe — we
+      // arrived here via a user gesture on the bead)
+      const an = ensureTtsGraph();
+      if (an) analyserRef.current = an;
+
+      el.src = url;
+      el.onplay = () => {
+        if (!closedRef.current) setStatus("speaking");
+      };
+      el.onended = () => {
+        if (closedRef.current) return;
+        if (analyserRef.current === ttsAnalyserRef.current) analyserRef.current = null;
+        setStatus("idle");
+        // natural turn-taking: reopen the mic after a tiny gap
+        window.setTimeout(() => {
+          if (!closedRef.current && statusRef.current === "idle") startListening();
+        }, 360);
+      };
+      el.onerror = () => {
+        if (!closedRef.current) setStatus("idle");
+      };
+      await el.play();
+    } catch (e: any) {
+      if (ctrl.signal.aborted || closedRef.current) return;
+      setErrorMsg("TTS failed");
+      setStatus("idle");
+    }
+  }, [startListening]);
+
+  // ---------------------------------------------------------------------
+  // interactions
+  // ---------------------------------------------------------------------
   const onBeadTap = () => {
+    // user gesture — kick the AudioContext alive for later TTS playback
+    ensureAudioCtx();
+
     if (status === "listening") {
       stopRecognition();
       stopMic();
@@ -277,13 +381,12 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
       return;
     }
     if (status === "speaking") {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {}
+      ttsAbortRef.current?.abort();
+      stopPlayback();
       setStatus("idle");
       return;
     }
-    if (status === "thinking") return; // can't interrupt the network call cleanly
+    if (status === "thinking") return;
     startListening();
   };
 
@@ -291,9 +394,8 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
     closedRef.current = true;
     stopRecognition();
     stopMic();
-    try {
-      window.speechSynthesis.cancel();
-    } catch {}
+    stopPlayback();
+    ttsAbortRef.current?.abort();
     onClose();
   };
 
@@ -307,7 +409,6 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
       ? t("voice_speaking")
       : t("voice_tap_to_talk"));
 
-  // status-driven aura glow
   const auraColor =
     status === "listening"
       ? "rgba(46,230,201,0.55)"
@@ -332,6 +433,11 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
         WebkitBackdropFilter: "blur(28px) saturate(160%)",
       }}
     >
+      {/* hidden audio element — TTS playback target. Lives inside the
+          component so the MediaElementSource binds once and survives every
+          subsequent reply. */}
+      <audio ref={audioElRef} preload="auto" hidden />
+
       {/* Header */}
       <div className="flex items-center justify-between px-5 pt-12 pb-2">
         <div>
@@ -378,7 +484,6 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
           className="relative flex items-center justify-center focus-visible:outline-none"
           style={{ width: 240, height: 240 }}
         >
-          {/* soft aura */}
           <motion.span
             aria-hidden
             className="absolute inset-0 rounded-full"

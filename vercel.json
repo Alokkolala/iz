@@ -9,6 +9,9 @@
     },
     "api/voice/chat.js": {
       "maxDuration": 30
+    },
+    "api/voice/tts.js": {
+      "maxDuration": 30
     }
   }
 }
