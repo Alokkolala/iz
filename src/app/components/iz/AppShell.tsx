@@ -6,13 +6,16 @@ import { CrewMap } from "./CrewMap";
 import { ViralShotAssistant } from "./ViralShotAssistant";
 import { ProfileMini } from "./ProfileMini";
 import { VoiceChat } from "./VoiceChat";
+import { AkimatDashboard } from "./AkimatDashboard";
 import type { TabId } from "./types";
 
 export function AppShell() {
   const [tab, setTab] = useState<TabId>("pulse");
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [akimatOpen, setAkimatOpen] = useState(false);
 
   const openVoice = () => setVoiceOpen(true);
+  const openAkimat = () => setAkimatOpen(true);
 
   const renderScreen = () => {
     switch (tab) {
@@ -23,7 +26,7 @@ export function AppShell() {
       case "lens":
         return <ViralShotAssistant onNavigate={setTab} />;
       case "profile":
-        return <ProfileMini />;
+        return <ProfileMini onOpenAkimat={openAkimat} />;
     }
   };
 
@@ -46,6 +49,9 @@ export function AppShell() {
       <BottomNav active={tab} onChange={setTab} onOpenVoice={openVoice} />
       <AnimatePresence>
         {voiceOpen && <VoiceChat onClose={() => setVoiceOpen(false)} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {akimatOpen && <AkimatDashboard onClose={() => setAkimatOpen(false)} />}
       </AnimatePresence>
     </div>
   );

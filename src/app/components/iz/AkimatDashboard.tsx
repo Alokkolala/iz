@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { useI18n } from "./i18n";
-import { Activity, MapPin, Users, RefreshCw, X } from "./Icons";
+import { Activity, MapPin, Users, RefreshCw, X, Sun, Footprints } from "./Icons";
 
 /**
  * Akimat tourism analytics — anonymous, aggregated view of how Iz is being
  * used across Mangystau. Designed to be handed to akimat (local-government)
  * staff so they can spot which sights are pulling visitors, on which days,
  * and at which hours. No PII; pure roll-ups from /api/analytics.
+ *
+ * The dashboard always shows the full chart structure — even with zero data
+ * we render empty bars so the akimat audience can see what the page will
+ * eventually contain. A soft banner explains the empty state in-line.
  */
 
 type SightCount = { label: string; count: number };
@@ -90,7 +94,50 @@ export function AkimatDashboard({ onClose }: Props) {
     return best && best.count > 0 ? best : null;
   }, [data]);
 
-  const empty = !!data && data.totalSnapshots === 0;
+  const peakDay = useMemo(() => {
+    if (!data) return null;
+    let best: DayCount | null = null;
+    for (const d of data.byDay) {
+      if (!best || d.count > best.count) best = d;
+    }
+    return best && best.count > 0 ? best : null;
+  }, [data]);
+
+  const activeDays = useMemo(() => {
+    if (!data) return 0;
+    return data.byDay.reduce((acc, d) => acc + (d.count > 0 ? 1 : 0), 0);
+  }, [data]);
+
+  const avgPerDay = useMemo(() => {
+    if (!data || data.byDay.length === 0) return 0;
+    const sum = data.byDay.reduce((a, b) => a + b.count, 0);
+    return sum / data.byDay.length;
+  }, [data]);
+
+  const topSharePct = useMemo(() => {
+    if (!data || data.totalSnapshots === 0 || data.bySight.length === 0) return 0;
+    return Math.round((data.bySight[0].count / data.totalSnapshots) * 100);
+  }, [data]);
+
+  // Always show 14 day-slots and 24 hour-slots so the chart skeleton is
+  // present even before the API responds.
+  const dayCells: DayCount[] = useMemo(() => {
+    if (data) return data.byDay;
+    const out: DayCount[] = [];
+    const now = Date.now();
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(now - i * 86_400_000);
+      out.push({ day: d.toISOString().slice(0, 10), count: 0 });
+    }
+    return out;
+  }, [data]);
+
+  const hourCells: HourCount[] = useMemo(() => {
+    if (data) return data.byHour;
+    return Array.from({ length: 24 }, (_, h) => ({ hour: h, count: 0 }));
+  }, [data]);
+
+  const isEmpty = !!data && data.totalSnapshots === 0;
 
   return (
     <motion.div
@@ -99,12 +146,11 @@ export function AkimatDashboard({ onClose }: Props) {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.28 }}
-      className="absolute inset-0 z-40 flex flex-col"
+      className="absolute inset-0 z-50 flex flex-col"
       style={{
+        // Solid base so nothing behind the overlay bleeds through.
         background:
-          "linear-gradient(180deg, rgba(8,30,52,0.78) 0%, rgba(8,30,52,0.62) 50%, rgba(8,30,52,0.86) 100%)",
-        backdropFilter: "blur(28px) saturate(160%)",
-        WebkitBackdropFilter: "blur(28px) saturate(160%)",
+          "radial-gradient(120% 80% at 50% 0%, #0d3a64 0%, #07223d 55%, #04162a 100%)",
       }}
     >
       {/* Header */}
@@ -169,7 +215,7 @@ export function AkimatDashboard({ onClose }: Props) {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-5 pb-24 pt-4">
+      <div className="flex-1 overflow-y-auto px-5 pb-10 pt-4">
         {err && (
           <div
             className="mb-4 rounded-2xl px-4 py-3"
@@ -184,60 +230,92 @@ export function AkimatDashboard({ onClose }: Props) {
           </div>
         )}
 
-        {!data && loading && (
-          <div className="grid grid-cols-2 gap-3">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <SkeletonStat key={i} />
-            ))}
-          </div>
-        )}
-
-        {data && empty && (
+        {isEmpty && (
           <div
-            className="rounded-2xl px-4 py-5"
+            className="mb-4 rounded-2xl px-4 py-3"
             style={{
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.14)",
-              color: "rgba(255,255,255,0.78)",
-              fontSize: 13,
+              background: "rgba(46,230,201,0.10)",
+              border: "1px solid rgba(46,230,201,0.32)",
+              color: "rgba(220,255,248,0.92)",
+              fontSize: 12.5,
+              lineHeight: 1.45,
             }}
           >
-            {t("akimat_no_data")}
+            {t("akimat_empty_hint")}
           </div>
         )}
 
-        {data && !empty && (
-          <div className="space-y-5">
-            {/* Stat tiles */}
-            <div className="grid grid-cols-2 gap-3">
-              <StatTile
-                icon={<Activity size={16} strokeWidth={2.2} />}
-                label={t("akimat_total")}
-                value={data.totalSnapshots}
-                delay={0}
-              />
-              <StatTile
-                icon={<Users size={16} strokeWidth={2.2} />}
-                label={t("akimat_explorers")}
-                value={data.uniqueExplorers}
-                delay={0.04}
-              />
-              <StatTile
-                icon={<MapPin size={16} strokeWidth={2.2} />}
-                label={t("akimat_last7")}
-                value={data.last7Days}
-                delay={0.08}
-              />
-              <StatTile
-                icon={<MapPin size={16} strokeWidth={2.2} />}
-                label={t("akimat_last30")}
-                value={data.last30Days}
-                delay={0.12}
-              />
-            </div>
+        <div className="space-y-5">
+          {/* Stat tiles — 2 columns × 3 rows */}
+          <div className="grid grid-cols-2 gap-3">
+            <StatTile
+              icon={<Activity size={16} strokeWidth={2.2} />}
+              label={t("akimat_total")}
+              value={data ? data.totalSnapshots.toLocaleString() : "—"}
+              delay={0}
+            />
+            <StatTile
+              icon={<Users size={16} strokeWidth={2.2} />}
+              label={t("akimat_explorers")}
+              value={data ? data.uniqueExplorers.toLocaleString() : "—"}
+              delay={0.04}
+            />
+            <StatTile
+              icon={<Footprints size={16} strokeWidth={2.2} />}
+              label={t("akimat_last7")}
+              value={data ? data.last7Days.toLocaleString() : "—"}
+              delay={0.08}
+            />
+            <StatTile
+              icon={<Footprints size={16} strokeWidth={2.2} />}
+              label={t("akimat_last30")}
+              value={data ? data.last30Days.toLocaleString() : "—"}
+              delay={0.12}
+            />
+            <StatTile
+              icon={<Activity size={16} strokeWidth={2.2} />}
+              label={t("akimat_avg_day")}
+              value={data ? avgPerDay.toFixed(1) : "—"}
+              delay={0.16}
+            />
+            <StatTile
+              icon={<MapPin size={16} strokeWidth={2.2} />}
+              label={t("akimat_top_share")}
+              value={data && topSharePct > 0 ? `${topSharePct}%` : "—"}
+              delay={0.2}
+            />
+          </div>
 
-            {/* Top sights */}
-            <Section title={t("akimat_top_sights")}>
+          {/* Secondary insights row */}
+          <div
+            className="grid grid-cols-2 gap-3 rounded-2xl p-3"
+            style={{
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <Insight
+              label={t("akimat_peak_day")}
+              value={peakDay ? `${fmtDay(peakDay.day)} · ${peakDay.count}` : "—"}
+            />
+            <Insight
+              label={t("akimat_active_days")}
+              value={data ? `${activeDays} / 14` : "—"}
+            />
+            <Insight
+              label={t("akimat_busiest_hour")}
+              value={busiestHour ? `${String(busiestHour.hour).padStart(2, "0")}:00 · ${busiestHour.count}` : "—"}
+            />
+            <Insight
+              label={data?.sampleWindow === "capped_5000" ? t("akimat_sample_capped") : t("akimat_sample_full")}
+              value={data ? data.totalSnapshots.toLocaleString() : "—"}
+              small
+            />
+          </div>
+
+          {/* Top sights */}
+          <Section title={t("akimat_top_sights")}>
+            {data && data.bySight.length > 0 ? (
               <div className="space-y-2.5">
                 {data.bySight.map((s, i) => (
                   <motion.div
@@ -278,93 +356,135 @@ export function AkimatDashboard({ onClose }: Props) {
                   </motion.div>
                 ))}
               </div>
-            </Section>
-
-            {/* By day */}
-            <Section title={t("akimat_by_day")}>
-              <div className="flex h-28 items-end gap-1">
-                {data.byDay.map((d, i) => {
-                  const h = Math.max(2, (d.count / dayMax) * 100);
-                  return (
-                    <div key={d.day} className="flex h-full flex-1 flex-col items-center justify-end gap-1.5">
-                      <motion.span
-                        initial={{ height: 0 }}
-                        animate={{ height: `${h}%` }}
-                        transition={{ delay: 0.02 * i, duration: 0.55, ease }}
-                        className="w-full rounded-t-md"
-                        style={{
-                          background:
-                            "linear-gradient(180deg, var(--iz-accent), rgba(46,230,201,0.35))",
-                          boxShadow: "0 0 14px rgba(46,230,201,0.22)",
-                          minHeight: 3,
-                        }}
-                        title={`${d.day} · ${d.count}`}
-                      />
-                      <span
-                        style={{
-                          fontSize: 9,
-                          color: "rgba(255,255,255,0.55)",
-                          letterSpacing: "0.04em",
-                        }}
-                      >
-                        {fmtDay(d.day)}
-                      </span>
-                    </div>
-                  );
-                })}
+            ) : (
+              <div className="space-y-2.5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div
+                      className="h-2.5 flex-1 rounded-full"
+                      style={{ background: "rgba(255,255,255,0.06)" }}
+                    />
+                    <div
+                      className="h-2 flex-[2] rounded-full"
+                      style={{ background: "rgba(255,255,255,0.06)" }}
+                    />
+                  </div>
+                ))}
+                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 8 }}>
+                  {t("akimat_no_sights")}
+                </p>
               </div>
-            </Section>
+            )}
+          </Section>
 
-            {/* By hour */}
-            <Section
-              title={t("akimat_by_hour")}
-              hint={
-                busiestHour
-                  ? `${t("akimat_busiest_hour")}: ${String(busiestHour.hour).padStart(2, "0")}:00`
-                  : undefined
-              }
-            >
-              <div className="flex h-24 items-end gap-[3px]">
-                {data.byHour.map((b, i) => {
-                  const h = Math.max(2, (b.count / hourMax) * 100);
-                  const isBest = busiestHour ? b.hour === busiestHour.hour : false;
-                  return (
-                    <div key={b.hour} className="flex h-full flex-1 flex-col items-end justify-end">
-                      <motion.span
-                        initial={{ height: 0 }}
-                        animate={{ height: `${h}%` }}
-                        transition={{ delay: 0.015 * i, duration: 0.5, ease }}
-                        className="w-full rounded-t-sm"
-                        style={{
-                          background: isBest
-                            ? "linear-gradient(180deg, #fff, var(--iz-accent))"
-                            : "linear-gradient(180deg, rgba(255,255,255,0.6), rgba(46,230,201,0.3))",
-                          boxShadow: isBest ? "0 0 16px rgba(46,230,201,0.55)" : undefined,
-                          minHeight: 2,
-                        }}
-                        title={`${String(b.hour).padStart(2, "0")}:00 · ${b.count}`}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-2 flex justify-between" style={{ fontSize: 10, color: "rgba(255,255,255,0.5)" }}>
-                <span>00</span>
-                <span>06</span>
-                <span>12</span>
-                <span>18</span>
-                <span>23</span>
-              </div>
-            </Section>
+          {/* By day */}
+          <Section title={t("akimat_by_day")}>
+            <div className="flex h-28 items-end gap-1">
+              {dayCells.map((d, i) => {
+                const ratio = d.count / dayMax;
+                const h = data ? Math.max(2, ratio * 100) : 6;
+                const isPeak = peakDay ? d.day === peakDay.day : false;
+                return (
+                  <div key={d.day} className="flex h-full flex-1 flex-col items-center justify-end gap-1.5">
+                    <motion.span
+                      initial={{ height: 0 }}
+                      animate={{ height: `${h}%` }}
+                      transition={{ delay: 0.02 * i, duration: 0.55, ease }}
+                      className="w-full rounded-t-md"
+                      style={{
+                        background: isPeak
+                          ? "linear-gradient(180deg, #fff, var(--iz-accent))"
+                          : data
+                          ? "linear-gradient(180deg, var(--iz-accent), rgba(46,230,201,0.35))"
+                          : "rgba(255,255,255,0.08)",
+                        boxShadow: isPeak ? "0 0 18px rgba(46,230,201,0.55)" : data ? "0 0 14px rgba(46,230,201,0.22)" : undefined,
+                        minHeight: 3,
+                      }}
+                      title={`${d.day} · ${d.count}`}
+                    />
+                    <span
+                      style={{
+                        fontSize: 9,
+                        color: "rgba(255,255,255,0.55)",
+                        letterSpacing: "0.04em",
+                      }}
+                    >
+                      {fmtDay(d.day)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
 
+          {/* By hour */}
+          <Section
+            title={t("akimat_by_hour")}
+            hint={
+              busiestHour
+                ? `${t("akimat_busiest_hour")}: ${String(busiestHour.hour).padStart(2, "0")}:00`
+                : undefined
+            }
+          >
+            <div className="flex h-24 items-end gap-[3px]">
+              {hourCells.map((b, i) => {
+                const ratio = b.count / hourMax;
+                const h = data ? Math.max(2, ratio * 100) : 6;
+                const isBest = busiestHour ? b.hour === busiestHour.hour : false;
+                return (
+                  <div key={b.hour} className="flex h-full flex-1 flex-col items-end justify-end">
+                    <motion.span
+                      initial={{ height: 0 }}
+                      animate={{ height: `${h}%` }}
+                      transition={{ delay: 0.015 * i, duration: 0.5, ease }}
+                      className="w-full rounded-t-sm"
+                      style={{
+                        background: isBest
+                          ? "linear-gradient(180deg, #fff, var(--iz-accent))"
+                          : data
+                          ? "linear-gradient(180deg, rgba(255,255,255,0.6), rgba(46,230,201,0.3))"
+                          : "rgba(255,255,255,0.08)",
+                        boxShadow: isBest ? "0 0 16px rgba(46,230,201,0.55)" : undefined,
+                        minHeight: 2,
+                      }}
+                      title={`${String(b.hour).padStart(2, "0")}:00 · ${b.count}`}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-2 flex justify-between" style={{ fontSize: 10, color: "rgba(255,255,255,0.5)" }}>
+              <span>00</span>
+              <span>06</span>
+              <span>12</span>
+              <span>18</span>
+              <span>23</span>
+            </div>
+          </Section>
+
+          {/* Legend + footer */}
+          <div
+            className="flex items-center gap-2 rounded-xl px-3 py-2"
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              color: "rgba(255,255,255,0.6)",
+              fontSize: 11,
+            }}
+          >
+            <Sun size={13} strokeWidth={2} />
+            <span>{t("akimat_legend")}</span>
+          </div>
+
+          {data && (
             <p
-              className="pt-2 text-center"
+              className="pt-1 text-center"
               style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}
             >
               {t("akimat_updated")} · {fmtTime(data.generatedAt)}
             </p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </motion.div>
   );
@@ -378,7 +498,7 @@ function StatTile({
 }: {
   icon: React.ReactNode;
   label: string;
-  value: number;
+  value: string;
   delay?: number;
 }) {
   return (
@@ -401,11 +521,44 @@ function StatTile({
       </div>
       <p
         className="tabular-nums"
-        style={{ fontSize: 26, fontWeight: 700, color: "#fff", lineHeight: 1.05, marginTop: 6 }}
+        style={{ fontSize: 24, fontWeight: 700, color: "#fff", lineHeight: 1.05, marginTop: 6 }}
       >
-        {value.toLocaleString()}
+        {value}
       </p>
     </motion.div>
+  );
+}
+
+function Insight({
+  label,
+  value,
+  small = false,
+}: {
+  label: string;
+  value: string;
+  small?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <p
+        className="truncate"
+        style={{
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "rgba(255,255,255,0.55)",
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </p>
+      <p
+        className="tabular-nums truncate"
+        style={{ fontSize: small ? 13 : 15, fontWeight: 600, color: "#fff", marginTop: 2 }}
+      >
+        {value}
+      </p>
+    </div>
   );
 }
 
@@ -444,17 +597,5 @@ function Section({
       </div>
       {children}
     </div>
-  );
-}
-
-function SkeletonStat() {
-  return (
-    <div
-      className="h-20 rounded-2xl"
-      style={{
-        background: "rgba(255,255,255,0.06)",
-        border: "1px solid rgba(255,255,255,0.12)",
-      }}
-    />
   );
 }

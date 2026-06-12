@@ -410,6 +410,51 @@ export const STRINGS: Dict = {
     ru: "Не удалось загрузить аналитику.",
     kk: "Аналитиканы жүктей алмадым.",
   },
+  akimat_avg_day: {
+    en: "Avg / day",
+    ru: "В среднем / день",
+    kk: "Орташа / күн",
+  },
+  akimat_peak_day: {
+    en: "Peak day",
+    ru: "Лучший день",
+    kk: "Шыңы күн",
+  },
+  akimat_active_days: {
+    en: "Active days · 14d",
+    ru: "Активных дней · 14",
+    kk: "Белсенді күндер · 14",
+  },
+  akimat_top_share: {
+    en: "Top sight share",
+    ru: "Доля топ-локации",
+    kk: "Үздік орын үлесі",
+  },
+  akimat_sample_capped: {
+    en: "Sample · last 5,000 snapshots",
+    ru: "Выборка · последние 5 000 снимков",
+    kk: "Іріктеу · соңғы 5 000 сурет",
+  },
+  akimat_sample_full: {
+    en: "Full sample",
+    ru: "Полная выборка",
+    kk: "Толық іріктеу",
+  },
+  akimat_legend: {
+    en: "Each snapshot = one photo analysed in Iz.",
+    ru: "Один снимок = одно фото, разобранное Iz.",
+    kk: "Бір сурет = Iz талдаған бір фото.",
+  },
+  akimat_empty_hint: {
+    en: "No snapshots yet — charts will fill in as visitors use Iz.",
+    ru: "Снимков пока нет — графики наполнятся, как только гости начнут пользоваться Iz.",
+    kk: "Әзірге сурет жоқ — қонақтар Iz-ді қолдана бастаған соң графиктер толады.",
+  },
+  akimat_no_sights: {
+    en: "No sights yet",
+    ru: "Локаций пока нет",
+    kk: "Орындар әзірге жоқ",
+  },
 };
 
 interface I18nCtx {
