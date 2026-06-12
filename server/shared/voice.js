@@ -44,7 +44,12 @@ TOOLS:
 - For "what can I do", "куда сходить", "чем заняться", or a quick itinerary: call plan_day.
 - For open-ended "recommend me", "surprise me", "what should I do right now": call recommend with no category.
 - For booking a table, calling a restaurant, reserving a tour, contacting a hotel: call book_whatsapp. Pass the place name and write a short polite message in ${langName} mentioning party size and time if known. The user will tap to send.
-- For talking to locals when the traveler doesn't share a language ("ask the driver", "tell him", "how do I say", "translate to Kazakh"): call translate. Pass the phrase in the traveler's own language and set "to" to "ru" or "kk". The translator card handles the back-and-forth — you don't repeat the translation in your spoken reply.
+- For talking to locals when the traveler doesn't share a language: call translate IMMEDIATELY the moment you have a phrase, even on the very first turn. Pass the phrase in the traveler's own language and set "to" to "ru" or "kk" (or "en"). The translator card handles the back-and-forth — you don't repeat the translation in your spoken reply.
+  Trigger phrases include, in any language:
+    en: "ask the driver", "tell him/her", "how do I say", "translate to Kazakh/Russian", "I want to talk to a local"
+    ru: "скажи ему/ей", "спроси у него/неё", "как сказать", "как будет", "переведи (на казахский/русский/английский)", "поговорить с местным", "на казахском/русском/английском"
+    kk: "оған айт", "сұра", "қалай айтуға болады", "аудар", "жергілікті адаммен сөйлес"
+  If the user names a target language ("на казахском", "in Kazakh") and gives a phrase in the SAME turn, do NOT ask for confirmation — call translate right away with that phrase. If the user only states intent without a phrase yet ("I want to talk to a local"), ask in one short sentence what to say.
 - For stable user preferences you just learned: call remember.
 
 After tools return, reply in one short spoken sentence. Do not repeat full card data. For translate cards, simply confirm "I'll ask them" (in ${langName}) — the card speaks the translation.
@@ -62,9 +67,54 @@ function isPlanIntent(userText) {
   return /(что.{0,16}(можно|делать|сделать)|куда.{0,12}(сходить|поехать)|чем.{0,12}зан|what.{0,12}to do|things to do|plan.{0,8}day|itinerary)/i.test(String(userText || ''))
 }
 
-async function forcedFallback({ intent, lastUser, location, lang }) {
+// Safety net for the translate tool. Flash-Lite sometimes ignores the tool
+// even when the user clearly says "скажи ему на казахском <phrase>" or
+// "tell him in Kazakh <phrase>". If we can extract both a target language
+// and a phrase, force the translate card rather than letting the model
+// answer in its own words.
+function detectTranslateIntent(userText) {
+  const t = String(userText || '').trim()
+  if (!t) return null
+
+  let to = null
+  if (/(на\s+казах|по[- ]?казахск|kazakh|қазақша|казахски|каз\b)/i.test(t)) to = 'kk'
+  else if (/(на\s+русск|по[- ]?русск|russian|орысша|рус\b)/i.test(t)) to = 'ru'
+  else if (/(на\s+англ|по[- ]?английск|english|ағылшынша|англ\b)/i.test(t)) to = 'en'
+
+  const hasIntent = /(переведи|перевод|скажи\s+(ему|ей|им)|спроси\s+(у\s+)?(него|неё|нее|них)|как\s+(сказать|будет)|tell\s+(him|her|them)|ask\s+(him|her|them|the\s+driver)|translate|how\s+do\s+i\s+say|оған[\s\S]{0,15}айт|айтып\s+бер|аудар)/i.test(t)
+
+  if (!hasIntent || !to) return null
+
+  let phrase = null
+  // 1) Text after "на казахском/in Kazakh" + optional separator
+  let m = t.match(/(?:на\s+(?:казахском|казахский|русском|русский|английском|английский|каз|рус|англ)|(?:in|into|to)\s+(?:kazakh|russian|english))[:,\s—-]+(.{2,})/i)
+  if (m) phrase = m[1]
+  // 2) Text after "скажи ему/tell him" verb
+  if (!phrase) {
+    m = t.match(/(?:скажи\s+(?:ему|ей|им)|tell\s+(?:him|her|them)|спроси\s+(?:у\s+)?(?:него|неё|нее|них)|ask\s+(?:him|her|them|the\s+driver))[\s,:—-]+(.{2,})/i)
+    if (m) phrase = m[1]
+  }
+  // 3) Text after "переведи/translate/аудар"
+  if (!phrase) {
+    m = t.match(/(?:переведи|translate|аудар(?:ып|ыңыз)?|как\s+(?:сказать|будет)|how\s+do\s+i\s+say)[\s:,—-]+(.{2,})/i)
+    if (m) phrase = m[1]
+  }
+
+  if (!phrase) return null
+
+  // Trim trailing language directive if it appears at the end of the phrase.
+  phrase = phrase
+    .replace(/\s*(на\s+(?:казахском|казахский|русском|русский|английском|английский)|(?:in|into|to)\s+(?:kazakh|russian|english))\s*[.!?]?\s*$/i, '')
+    .replace(/^["'«»""]+|["'«»""]+$/g, '')
+    .trim()
+
+  if (phrase.length < 2 || phrase.length > 400) return null
+  return { phrase, to }
+}
+
+async function forcedFallback({ intent, lastUser, location, lang, userId }) {
   if (isPlanIntent(lastUser) && location) {
-    const result = await dispatchTool('plan_day', {}, { lang, location, userId: null })
+    const result = await dispatchTool('plan_day', {}, { lang, location, userId: userId ?? null })
     return {
       action: result.display || null,
       text: {
@@ -72,6 +122,24 @@ async function forcedFallback({ intent, lastUser, location, lang }) {
         ru: 'Вот короткий план по Актау: вид, еда и точка для фото.',
         kk: 'Міне, Ақтау бойынша қысқа жоспар: көрініс, тамақ және фото нүкте.',
       }[lang],
+    }
+  }
+  const translateIntent = detectTranslateIntent(lastUser)
+  if (translateIntent) {
+    const tr = await dispatchTool(
+      'translate',
+      { phrase: translateIntent.phrase, to: translateIntent.to },
+      { lang, location, userId: userId ?? null },
+    )
+    if (tr.display) {
+      return {
+        action: tr.display,
+        text: {
+          en: "I'll ask them.",
+          ru: 'Сейчас спрошу.',
+          kk: 'Қазір сұраймын.',
+        }[lang],
+      }
     }
   }
   const action = await applyIntent(intent, location, lang)
@@ -156,6 +224,7 @@ If the user references "that map", "that pin", "ту точку", "что пок
         lastUser,
         location: hasLoc ? location : null,
         lang: L,
+        userId,
       })
       if (forced.action) {
         resultAction = forced.action
