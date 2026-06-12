@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { motion } from "motion/react";
-import { MapPin, Camera, Footprints, Camera as Cam, Check, Users, Navigation } from "./Icons";
+import { AnimatePresence, motion } from "motion/react";
+import { MapPin, Camera, Footprints, Camera as Cam, Check, Users, Navigation, Activity } from "./Icons";
 import { Card, Button, IconChip, Overline } from "./ui";
 import { useI18n } from "./i18n";
 import { LangSwitcher } from "./LangSwitcher";
 import { useStore, relativeTime } from "./store";
 import { useAuth } from "../../../lib/AuthProvider";
+import { AkimatDashboard } from "./AkimatDashboard";
 import {
   fetchProfile,
   updateProfileName,
@@ -82,6 +83,9 @@ export function ProfileMini() {
     setTimeout(() => setPwMsg(null), 2200);
   };
 
+  // ---- Akimat analytics dashboard ----
+  const [akimatOpen, setAkimatOpen] = useState(false);
+
   // ---- Delete account ----
   const [delConfirm, setDelConfirm] = useState(false);
   const [delBusy, setDelBusy] = useState(false);
@@ -93,6 +97,7 @@ export function ProfileMini() {
   };
 
   return (
+    <>
     <div className="flex h-full flex-col gap-5 overflow-y-auto px-5 pb-28 pt-12">
       <div className="flex items-start justify-between">
         <div>
@@ -198,6 +203,18 @@ export function ProfileMini() {
         )}
       </div>
 
+      {/* Akimat tourism analytics */}
+      <div>
+        <Overline className="mb-3">{t("akimat_kicker")}</Overline>
+        <Card className="flex items-center gap-3 p-4" onClick={() => setAkimatOpen(true)}>
+          <IconChip size={40} tone="accent"><Activity size={18} strokeWidth={2.2} /></IconChip>
+          <div className="min-w-0 flex-1">
+            <p style={{ fontSize: 14, fontWeight: 600, color: "var(--iz-ink)" }}>{t("akimat_open")}</p>
+            <p className="truncate" style={{ fontSize: 12, color: "var(--iz-ink-3)" }}>{t("akimat_subtitle")}</p>
+          </div>
+        </Card>
+      </div>
+
       {/* Security */}
       <div>
         <Overline className="mb-3">{t("security")}</Overline>
@@ -253,5 +270,9 @@ export function ProfileMini() {
         <Navigation size={15} strokeWidth={2.2} /> {t("sign_out")}
       </Button>
     </div>
+    <AnimatePresence>
+      {akimatOpen && <AkimatDashboard onClose={() => setAkimatOpen(false)} />}
+    </AnimatePresence>
+    </>
   );
 }

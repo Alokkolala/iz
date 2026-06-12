@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { pickReferences } from './references.js'
 import { handleVoiceChat } from './shared/voice.js'
 import { handleTranslate } from './shared/translate.js'
+import { handleAnalytics } from './shared/analytics.js'
 import { handleWhatsappSend, handleWhatsappStatus } from './shared/whatsapp-send.js'
 import { handleVoiceStt } from './shared/stt.js'
 
@@ -746,6 +747,7 @@ function narrateForcedAction(intent, action, L) {
 
 app.post('/api/voice/chat', handleVoiceChat)
 app.post('/api/translate', handleTranslate)
+app.get('/api/analytics', handleAnalytics)
 app.post('/api/whatsapp/send', handleWhatsappSend)
 app.get('/api/whatsapp/status', handleWhatsappStatus)
 app.post('/api/voice/stt', express.raw({ type: '*/*', limit: '20mb' }), handleVoiceStt)

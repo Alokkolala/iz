@@ -323,6 +323,93 @@ export const STRINGS: Dict = {
     ru: "Не получилось перевести. Попробуй ещё раз.",
     kk: "Аудара алмадым. Қайталап көр.",
   },
+
+  // Akimat tourism analytics
+  akimat_open: {
+    en: "Akimat · tourism analytics",
+    ru: "Акимат · аналитика турпотока",
+    kk: "Әкімдік · туристер ағыны",
+  },
+  akimat_kicker: {
+    en: "For local government",
+    ru: "Для местной власти",
+    kk: "Жергілікті билік үшін",
+  },
+  akimat_title: {
+    en: "Tourist flow · Mangystau",
+    ru: "Турпоток · Маңғыстау",
+    kk: "Туристер ағыны · Маңғыстау",
+  },
+  akimat_subtitle: {
+    en: "Anonymous, aggregated signals from Iz users across the region.",
+    ru: "Анонимные агрегированные сигналы от пользователей Iz по региону.",
+    kk: "Iz қолданушыларынан жиналған анонимді мәліметтер.",
+  },
+  akimat_total: {
+    en: "Total snapshots",
+    ru: "Всего снимков",
+    kk: "Барлық суреттер",
+  },
+  akimat_explorers: {
+    en: "Unique explorers",
+    ru: "Уникальных гостей",
+    kk: "Бірегей қонақтар",
+  },
+  akimat_last7: {
+    en: "Last 7 days",
+    ru: "За 7 дней",
+    kk: "Соңғы 7 күн",
+  },
+  akimat_last30: {
+    en: "Last 30 days",
+    ru: "За 30 дней",
+    kk: "Соңғы 30 күн",
+  },
+  akimat_top_sights: {
+    en: "Top sights",
+    ru: "Топ-локации",
+    kk: "Үздік орындар",
+  },
+  akimat_by_day: {
+    en: "Activity · last 14 days",
+    ru: "Активность · 14 дней",
+    kk: "Белсенділік · 14 күн",
+  },
+  akimat_by_hour: {
+    en: "Activity by hour",
+    ru: "Активность по часам",
+    kk: "Сағат бойынша белсенділік",
+  },
+  akimat_busiest_hour: {
+    en: "Busiest hour",
+    ru: "Час пик",
+    kk: "Шыңы сағат",
+  },
+  akimat_no_data: {
+    en: "Not enough data yet — share Iz with more visitors to grow the picture.",
+    ru: "Пока мало данных — расскажи об Iz большему числу гостей.",
+    kk: "Деректер әзірге аз — Iz туралы көп қонаққа айт.",
+  },
+  akimat_close: {
+    en: "Close",
+    ru: "Закрыть",
+    kk: "Жабу",
+  },
+  akimat_refresh: {
+    en: "Refresh",
+    ru: "Обновить",
+    kk: "Жаңарту",
+  },
+  akimat_updated: {
+    en: "Updated",
+    ru: "Обновлено",
+    kk: "Жаңартылды",
+  },
+  akimat_load_error: {
+    en: "Couldn't load analytics.",
+    ru: "Не удалось загрузить аналитику.",
+    kk: "Аналитиканы жүктей алмадым.",
+  },
 };
 
 interface I18nCtx {
