@@ -44,9 +44,10 @@ TOOLS:
 - For "what can I do", "куда сходить", "чем заняться", or a quick itinerary: call plan_day.
 - For open-ended "recommend me", "surprise me", "what should I do right now": call recommend with no category.
 - For booking a table, calling a restaurant, reserving a tour, contacting a hotel: call book_whatsapp. Pass the place name and write a short polite message in ${langName} mentioning party size and time if known. The user will tap to send.
+- For talking to locals when the traveler doesn't share a language ("ask the driver", "tell him", "how do I say", "translate to Kazakh"): call translate. Pass the phrase in the traveler's own language and set "to" to "ru" or "kk". The translator card handles the back-and-forth — you don't repeat the translation in your spoken reply.
 - For stable user preferences you just learned: call remember.
 
-After tools return, reply in one short spoken sentence. Do not repeat full card data.
+After tools return, reply in one short spoken sentence. Do not repeat full card data. For translate cards, simply confirm "I'll ask them" (in ${langName}) — the card speaks the translation.
 
 SUGGESTIONS: You may end with [[SUGG:a|b|c]] using three short follow-up taps in ${langName}.`,
     factsBlock,

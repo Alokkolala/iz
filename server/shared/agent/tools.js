@@ -5,6 +5,7 @@ import { searchWeb } from './tools/web-search.js'
 import { buildMultiStopRoute } from './tools/route.js'
 import { buildRecommendations } from './tools/recommend.js'
 import { buildWhatsappBooking } from './tools/whatsapp.js'
+import { translateText } from './tools/translate.js'
 
 export const TOOL_SCHEMA = [
   {
@@ -127,6 +128,21 @@ export const TOOL_SCHEMA = [
           phone: { type: 'string', description: 'Optional known phone number, any common format.' },
         },
         required: ['name', 'message'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'translate',
+      description: 'Translate a phrase between the traveler\'s language and a local language (Russian or Kazakh) and surface a back-and-forth translator card. Use when the user says "ask him/her", "tell the driver", "how do I say", "translate this to Kazakh/Russian", or otherwise wants to communicate with a local who does not share their language.',
+      parameters: {
+        type: 'object',
+        properties: {
+          phrase: { type: 'string', description: 'The text the traveler wants to convey, in the traveler\'s language.' },
+          to: { type: 'string', description: 'Target language for the local. One of ru (Russian) or kk (Kazakh). Default ru.' },
+        },
+        required: ['phrase'],
       },
     },
   },
@@ -344,6 +360,35 @@ export async function dispatchTool(name, args, ctx) {
         factsApplied: rec.factsApplied,
         category,
         picks: rec.items.map((i) => ({ type: i.type, title: i.title, phone: i.phone || null })),
+      },
+    }
+  }
+
+  if (name === 'translate') {
+    const phrase = String(args?.phrase || '').slice(0, 600)
+    const toRaw = String(args?.to || 'ru')
+    const result = await translateText({ text: phrase, from: L, to: toRaw })
+    if (result.error) {
+      return { toolResult: { error: result.error } }
+    }
+    if (result.sameLanguage) {
+      return {
+        toolResult: { error: 'same_language', from: result.from, to: result.to },
+      }
+    }
+    const action = {
+      kind: 'translate',
+      originalText: phrase,
+      originalLang: result.from || L,
+      translatedText: result.translated,
+      targetLang: result.to,
+    }
+    return {
+      display: action,
+      toolResult: {
+        translated: result.translated,
+        from: result.from,
+        to: result.to,
       },
     }
   }
