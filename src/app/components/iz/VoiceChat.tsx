@@ -6,7 +6,20 @@ import { Stone3D } from "./Stone3D";
 import { useAuth } from "../../../lib/AuthProvider";
 import { clearChatHistory, listChatMessages, saveChatMessage } from "../../../lib/db";
 
-const VoiceSphere = lazy(() => import("./VoiceSphere"));
+// Wrap the dynamic import so a stale cached index-*.js doesn't crash the
+// chat when a fresh deploy has rotated the VoiceSphere chunk hash. We try
+// once, and on failure we force a one-time reload to pick up the new HTML
+// (and the new chunk URLs it references).
+const VoiceSphere = lazy(() =>
+  import("./VoiceSphere").catch((err) => {
+    const RELOAD_FLAG = "iz-reloaded-for-chunk";
+    if (typeof window !== "undefined" && !sessionStorage.getItem(RELOAD_FLAG)) {
+      sessionStorage.setItem(RELOAD_FLAG, "1");
+      window.location.reload();
+    }
+    throw err;
+  }),
+);
 
 /**
  * Iz voice chat.
