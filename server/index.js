@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { z } from 'zod'
 import { pickReferences } from './references.js'
 import { handleVoiceChat } from './shared/voice.js'
+import { handleWhatsappSend, handleWhatsappStatus } from './shared/whatsapp-send.js'
 
 const app = express()
 app.use(express.json({ limit: '15mb' }))
@@ -742,6 +743,8 @@ function narrateForcedAction(intent, action, L) {
 }
 
 app.post('/api/voice/chat', handleVoiceChat)
+app.post('/api/whatsapp/send', handleWhatsappSend)
+app.get('/api/whatsapp/status', handleWhatsappStatus)
 
 /**
  * TTS via OpenRouter `/audio/speech`.

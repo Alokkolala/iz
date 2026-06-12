@@ -4,6 +4,7 @@ import { buildOSMEmbed, fetchWeather, searchOSMPlaces } from '../voice-primitive
 import { searchWeb } from './tools/web-search.js'
 import { buildMultiStopRoute } from './tools/route.js'
 import { buildRecommendations } from './tools/recommend.js'
+import { buildWhatsappBooking } from './tools/whatsapp.js'
 
 export const TOOL_SCHEMA = [
   {
@@ -110,6 +111,22 @@ export const TOOL_SCHEMA = [
           },
         },
         required: ['stops'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'book_whatsapp',
+      description: 'Draft a booking / enquiry message and prepare a WhatsApp deep link to a real place. Use when the user asks to book a table, reserve a tour, contact a hotel or shop. The agent writes the message in the user\'s language; this tool finds the phone (OSM + web) and returns a card with Open in WhatsApp.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Place name, e.g. "Cafe Riviera" or "Hotel Caspian".' },
+          message: { type: 'string', description: 'Polite booking / enquiry message in the user language. Mention party size and time if known.' },
+          phone: { type: 'string', description: 'Optional known phone number, any common format.' },
+        },
+        required: ['name', 'message'],
       },
     },
   },
@@ -272,6 +289,35 @@ export async function dispatchTool(name, args, ctx) {
       toolResult: {
         url: result.url,
         stops: result.stops.map((s) => s.name),
+      },
+    }
+  }
+
+  if (name === 'book_whatsapp') {
+    const placeName = String(args?.name || '').slice(0, 80)
+    const message = String(args?.message || '').slice(0, 1200)
+    const phoneArg = args?.phone ? String(args.phone).slice(0, 30) : null
+    if (!placeName || !message) return { toolResult: { error: 'missing_fields' } }
+    const action = await withTimeout(
+      buildWhatsappBooking({
+        name: placeName,
+        message,
+        phone: phoneArg,
+        location: loc,
+        searchWeb,
+      }),
+      12000,
+      null,
+    )
+    if (!action) return { toolResult: { error: 'whatsapp_failed' } }
+    return {
+      display: action,
+      toolResult: {
+        name: action.name,
+        phone: action.phone,
+        source: action.source,
+        canSendDirect: action.canSendDirect,
+        waUrl: action.waUrl,
       },
     }
   }

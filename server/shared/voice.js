@@ -42,6 +42,7 @@ TOOLS:
 - For multi-stop routes, day trips, "route through A and B": call build_route.
 - For "what can I do", "куда сходить", "чем заняться", or a quick itinerary: call plan_day.
 - For "recommend me", "surprise me", "what should I do right now": call recommend.
+- For booking a table, calling a restaurant, reserving a tour, contacting a hotel: call book_whatsapp. Pass the place name and write a short polite message in ${langName} mentioning party size and time if known. The user will tap to send.
 - For stable user preferences you just learned: call remember.
 
 After tools return, reply in one short spoken sentence. Do not repeat full card data.

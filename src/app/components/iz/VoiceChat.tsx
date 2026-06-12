@@ -111,7 +111,17 @@ type RecommendAction = {
   factsApplied: string | null;
   items: RecommendItem[];
 };
-type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction | PlanAction | WebResultsAction | RouteAction | RecommendAction;
+type WhatsAppAction = {
+  kind: "whatsapp";
+  name: string;
+  phone: string | null;
+  phoneDisplay: string;
+  draft: string;
+  waUrl: string | null;
+  source: "user" | "osm" | "web" | null;
+  canSendDirect: boolean;
+};
+type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction | PlanAction | WebResultsAction | RouteAction | RecommendAction | WhatsAppAction;
 type Msg = {
   role: "user" | "assistant";
   text: string;
@@ -604,6 +614,18 @@ function parseAction(a: any): Action | null {
         })),
     };
   }
+  if (a.kind === "whatsapp" && typeof a.name === "string" && typeof a.draft === "string") {
+    return {
+      kind: "whatsapp",
+      name: String(a.name),
+      phone: typeof a.phone === "string" ? a.phone : null,
+      phoneDisplay: String(a.phoneDisplay ?? ""),
+      draft: String(a.draft),
+      waUrl: typeof a.waUrl === "string" ? a.waUrl : null,
+      source: a.source === "user" || a.source === "osm" || a.source === "web" ? a.source : null,
+      canSendDirect: Boolean(a.canSendDirect),
+    };
+  }
   if (a.kind === "recommend" && Array.isArray(a.items)) {
     return {
       kind: "recommend",
@@ -950,6 +972,162 @@ function RouteCard({
   );
 }
 
+function WhatsAppCard({
+  action,
+  labelOpen,
+  labelSend,
+  labelSent,
+  labelSending,
+  labelSendFailed,
+  labelNoPhone,
+  labelDraft,
+  labelTo,
+}: {
+  action: WhatsAppAction;
+  labelOpen: string;
+  labelSend: string;
+  labelSent: string;
+  labelSending: string;
+  labelSendFailed: string;
+  labelNoPhone: string;
+  labelDraft: string;
+  labelTo: string;
+}) {
+  const { session } = useAuth();
+  const [sendState, setSendState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  const onSendNow = async () => {
+    if (!action.phone || !session) return;
+    setSendState("sending");
+    try {
+      const res = await fetch("/api/whatsapp/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ phone: action.phone, message: action.draft }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setSendState("sent");
+    } catch {
+      setSendState("error");
+    }
+  };
+
+  return (
+    <div
+      className="mt-2 w-full max-w-[320px] overflow-hidden rounded-2xl"
+      style={{
+        background: "rgba(255,255,255,0.08)",
+        border: "1px solid rgba(255,255,255,0.16)",
+        backdropFilter: "blur(14px)",
+        WebkitBackdropFilter: "blur(14px)",
+      }}
+    >
+      <div
+        className="flex items-center gap-2 px-3 py-2"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
+      >
+        <span
+          aria-hidden
+          style={{
+            display: "inline-flex",
+            width: 28,
+            height: 28,
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: "50%",
+            background: "#25D366",
+            color: "#fff",
+            flexShrink: 0,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <path d="M20.5 3.5A11 11 0 0 0 3.4 17.2L2 22l5-1.3A11 11 0 1 0 20.5 3.5zm-8.5 17a9 9 0 0 1-4.6-1.3l-.3-.2-3 .8.8-2.9-.2-.3A9 9 0 1 1 12 20.5zm5-6.7c-.3-.2-1.7-.9-2-1-.3-.1-.5-.1-.7.2l-1 1.2c-.2.2-.4.3-.7.1-.3-.2-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6l.4-.5c.1-.2.2-.3.3-.5.1-.2.1-.4 0-.5 0-.2-.7-1.7-.9-2.3-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.7.4-.3.3-1 1-1 2.5s1 2.9 1.2 3.1c.1.2 2 3.1 4.9 4.3.7.3 1.2.5 1.6.6.7.2 1.3.2 1.8.1.5-.1 1.7-.7 2-1.4.2-.7.2-1.2.2-1.4-.1-.1-.3-.2-.6-.3z" />
+          </svg>
+        </span>
+        <div className="min-w-0 flex-1">
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#fff", lineHeight: 1.2 }}>
+            {labelTo} {action.name}
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", lineHeight: 1.3 }}>
+            {action.phoneDisplay || labelNoPhone}
+          </div>
+        </div>
+      </div>
+      <div
+        className="px-3 py-2"
+        style={{ fontSize: 12, color: "rgba(255,255,255,0.85)", lineHeight: 1.45 }}
+      >
+        <div
+          className="uppercase mb-1"
+          style={{
+            fontSize: 10,
+            letterSpacing: "0.12em",
+            color: "rgba(94,234,212,0.86)",
+            fontWeight: 700,
+          }}
+        >
+          {labelDraft}
+        </div>
+        <div style={{ whiteSpace: "pre-wrap" }}>{action.draft}</div>
+      </div>
+      <div className="flex" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+        {action.waUrl && (
+          <a
+            href={action.waUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5"
+            style={{
+              background: "#25D366",
+              color: "#06281a",
+              fontSize: 13,
+              fontWeight: 700,
+              textDecoration: "none",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M20.5 3.5A11 11 0 0 0 3.4 17.2L2 22l5-1.3A11 11 0 1 0 20.5 3.5zm-8.5 17a9 9 0 0 1-4.6-1.3l-.3-.2-3 .8.8-2.9-.2-.3A9 9 0 1 1 12 20.5z" />
+            </svg>
+            {labelOpen}
+          </a>
+        )}
+        {action.canSendDirect && action.phone && session && (
+          <button
+            onClick={onSendNow}
+            disabled={sendState === "sending" || sendState === "sent"}
+            className="flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5"
+            style={{
+              background:
+                sendState === "sent"
+                  ? "rgba(45,212,191,0.25)"
+                  : sendState === "error"
+                  ? "rgba(220,80,80,0.25)"
+                  : "rgba(255,255,255,0.10)",
+              borderLeft: action.waUrl ? "1px solid rgba(255,255,255,0.12)" : "none",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 700,
+              cursor:
+                sendState === "sending" || sendState === "sent" ? "default" : "pointer",
+            }}
+          >
+            {sendState === "sending"
+              ? labelSending
+              : sendState === "sent"
+              ? labelSent
+              : sendState === "error"
+              ? labelSendFailed
+              : labelSend}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function RecommendCard({
   action,
   label,
@@ -1095,6 +1273,15 @@ function Bubble({
   labelRouteStops,
   labelOpenRoute,
   labelRecommendations,
+  recommendShowMe,
+  labelWaOpen,
+  labelWaSend,
+  labelWaSending,
+  labelWaSent,
+  labelWaFailed,
+  labelWaNoPhone,
+  labelWaDraft,
+  labelWaTo,
 }: {
   msg: Msg;
   isLast: boolean;
@@ -1114,6 +1301,14 @@ function Bubble({
   labelOpenRoute: string;
   labelRecommendations: string;
   recommendShowMe: string;
+  labelWaOpen: string;
+  labelWaSend: string;
+  labelWaSending: string;
+  labelWaSent: string;
+  labelWaFailed: string;
+  labelWaNoPhone: string;
+  labelWaDraft: string;
+  labelWaTo: string;
 }) {
   if (msg.role === "user") {
     return (
@@ -1199,6 +1394,19 @@ function Bubble({
             action={msg.action}
             labelStops={labelRouteStops}
             labelOpen={labelOpenRoute}
+          />
+        )}
+        {msg.action?.kind === "whatsapp" && (
+          <WhatsAppCard
+            action={msg.action}
+            labelOpen={labelWaOpen}
+            labelSend={labelWaSend}
+            labelSending={labelWaSending}
+            labelSent={labelWaSent}
+            labelSendFailed={labelWaFailed}
+            labelNoPhone={labelWaNoPhone}
+            labelDraft={labelWaDraft}
+            labelTo={labelWaTo}
           />
         )}
         {msg.action?.kind === "recommend" && (
@@ -1998,6 +2206,14 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
                 labelOpenRoute={t("voice_open_route")}
                 labelRecommendations={t("voice_recommendations")}
                 recommendShowMe={t("voice_recommend_show_me")}
+                labelWaOpen={t("voice_wa_open")}
+                labelWaSend={t("voice_wa_send")}
+                labelWaSending={t("voice_wa_sending")}
+                labelWaSent={t("voice_wa_sent")}
+                labelWaFailed={t("voice_wa_failed")}
+                labelWaNoPhone={t("voice_wa_no_phone")}
+                labelWaDraft={t("voice_wa_draft")}
+                labelWaTo={t("voice_wa_to")}
               />
             ))}
             {status === "thinking" && <TypingRow key="typing" />}

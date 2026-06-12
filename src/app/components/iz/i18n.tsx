@@ -264,6 +264,18 @@ export const STRINGS: Dict = {
     ru: "Очистить всю историю чата?",
     kk: "Барлық чат тарихын өшіру керек пе?",
   },
+  voice_wa_to: { en: "To", ru: "Кому", kk: "Кімге" },
+  voice_wa_draft: { en: "Message", ru: "Сообщение", kk: "Хабар" },
+  voice_wa_open: { en: "Open in WhatsApp", ru: "Открыть WhatsApp", kk: "WhatsApp-та ашу" },
+  voice_wa_send: { en: "Send now", ru: "Отправить сейчас", kk: "Қазір жіберу" },
+  voice_wa_sending: { en: "Sending…", ru: "Отправляю…", kk: "Жіберілуде…" },
+  voice_wa_sent: { en: "Sent", ru: "Отправлено", kk: "Жіберілді" },
+  voice_wa_failed: { en: "Send failed", ru: "Не отправилось", kk: "Жіберу қатесі" },
+  voice_wa_no_phone: {
+    en: "No phone found — ask them by another channel",
+    ru: "Номер не найден — спроси другим способом",
+    kk: "Нөмір табылмады — басқа жолмен сұра",
+  },
 };
 
 interface I18nCtx {

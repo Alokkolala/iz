@@ -1,0 +1,19 @@
+{
+  "name": "iz-whatsapp-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Persistent whatsapp-web.js worker that the Iz Mangystau agent calls to send booking messages on behalf of the signed-in user.",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.27.0"
+  }
+}
