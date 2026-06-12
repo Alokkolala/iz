@@ -276,6 +276,48 @@ export const STRINGS: Dict = {
     ru: "Номер не найден — спроси другим способом",
     kk: "Нөмір табылмады — басқа жолмен сұра",
   },
+
+  // Translator card
+  tr_kicker: {
+    en: "Translator · hand the phone over",
+    ru: "Переводчик · передай телефон",
+    kk: "Аудармашы · телефонды бер",
+  },
+  tr_speak_to_local: {
+    en: "Speak to local",
+    ru: "Озвучить местному",
+    kk: "Жергіліктіге айт",
+  },
+  tr_hand_to_local: {
+    en: "Hand over · let them reply",
+    ru: "Передать · пусть ответят",
+    kk: "Бер · жауабын күт",
+  },
+  tr_listening_local: {
+    en: "Listening to the local…",
+    ru: "Слушаю местного…",
+    kk: "Жергіліктіні тыңдап жатырмын…",
+  },
+  tr_replied: {
+    en: "They said",
+    ru: "Они сказали",
+    kk: "Олар айтты",
+  },
+  tr_new_round: {
+    en: "Another phrase",
+    ru: "Ещё фразу",
+    kk: "Тағы бір сөйлем",
+  },
+  tr_error_same_lang: {
+    en: "Same language — nothing to translate.",
+    ru: "Тот же язык — переводить нечего.",
+    kk: "Сол тіл — аударатын ештеңе жоқ.",
+  },
+  tr_error_generic: {
+    en: "Couldn't translate that. Try once more.",
+    ru: "Не получилось перевести. Попробуй ещё раз.",
+    kk: "Аудара алмадым. Қайталап көр.",
+  },
 };
 
 interface I18nCtx {
