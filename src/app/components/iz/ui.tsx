@@ -26,27 +26,55 @@ export function Card({
   inset?: boolean;
   flush?: boolean; // for media tiles: clip content, no glass
 }) {
+  // Interactive cards (those with onClick) get a subtle lift + press feel.
+  // Static cards are plain divs so they don't trigger layout work for nothing.
+  const interactive = !!onClick;
   if (flush) {
+    if (interactive) {
+      return (
+        <motion.div
+          onClick={onClick}
+          className={className}
+          whileHover={{ y: -2, scale: 1.005 }}
+          whileTap={{ scale: 0.985 }}
+          transition={tap}
+          style={{ borderRadius: "var(--iz-r-lg)", overflow: "hidden", border: "1px solid var(--iz-border)", boxShadow: "var(--iz-glass-shadow)", cursor: "pointer", ...style }}
+        >
+          {children}
+        </motion.div>
+      );
+    }
     return (
       <div onClick={onClick} className={className} style={{ borderRadius: "var(--iz-r-lg)", overflow: "hidden", border: "1px solid var(--iz-border)", boxShadow: "var(--iz-glass-shadow)", ...style }}>
         {children}
       </div>
     );
   }
+  const baseStyle: CSSProperties = {
+    background: inset ? "var(--iz-glass-bg)" : "var(--iz-glass-bg-strong)",
+    backdropFilter: GLASS_BLUR,
+    WebkitBackdropFilter: GLASS_BLUR,
+    border: "1px solid var(--iz-glass-border)",
+    borderRadius: "var(--iz-r-lg)",
+    boxShadow: inset ? "var(--iz-glass-hi)" : "var(--iz-glass-shadow), var(--iz-glass-hi)",
+    ...style,
+  };
+  if (interactive) {
+    return (
+      <motion.div
+        onClick={onClick}
+        className={className}
+        whileHover={{ y: -2, scale: 1.005 }}
+        whileTap={{ scale: 0.985 }}
+        transition={tap}
+        style={{ ...baseStyle, cursor: "pointer" }}
+      >
+        {children}
+      </motion.div>
+    );
+  }
   return (
-    <div
-      onClick={onClick}
-      className={className}
-      style={{
-        background: inset ? "var(--iz-glass-bg)" : "var(--iz-glass-bg-strong)",
-        backdropFilter: GLASS_BLUR,
-        WebkitBackdropFilter: GLASS_BLUR,
-        border: "1px solid var(--iz-glass-border)",
-        borderRadius: "var(--iz-r-lg)",
-        boxShadow: inset ? "var(--iz-glass-hi)" : "var(--iz-glass-shadow), var(--iz-glass-hi)",
-        ...style,
-      }}
-    >
+    <div onClick={onClick} className={className} style={baseStyle}>
       {children}
     </div>
   );

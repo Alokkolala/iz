@@ -41,13 +41,30 @@ function TabButton({ tab, isActive, onChange, label }: {
           transition={{ type: "spring", stiffness: 500, damping: 32 }}
         />
       )}
-      <motion.span
-        animate={{ scale: isActive ? 1.08 : 1, y: isActive ? -1 : 0 }}
-        transition={{ type: "spring", stiffness: 420, damping: 24 }}
-        className="flex"
-      >
-        <Icon size={23} strokeWidth={2} />
-      </motion.span>
+      <span className="relative flex">
+        {isActive && (
+          <motion.span
+            layoutId="nav-halo"
+            aria-hidden
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+            style={{
+              width: 36,
+              height: 36,
+              background: "var(--iz-accent)",
+              opacity: 0.18,
+              filter: "blur(10px)",
+            }}
+            transition={{ type: "spring", stiffness: 500, damping: 32 }}
+          />
+        )}
+        <motion.span
+          animate={{ scale: isActive ? 1.1 : 1, y: isActive ? -1 : 0 }}
+          transition={{ type: "spring", stiffness: 420, damping: 24 }}
+          className="relative flex"
+        >
+          <Icon size={23} strokeWidth={2} />
+        </motion.span>
+      </span>
       <span style={{ fontSize: 11, fontWeight: isActive ? 600 : 500 }}>{label}</span>
     </button>
   );
