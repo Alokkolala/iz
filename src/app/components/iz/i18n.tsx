@@ -234,6 +234,11 @@ export const STRINGS: Dict = {
     ru: "Доступ к микрофону запрещён.",
     kk: "Микрофонға рұқсат жоқ.",
   },
+  voice_stt_failed: {
+    en: "Couldn't catch that — try again.",
+    ru: "Не расслышал — попробуй ещё.",
+    kk: "Естімедім — қайталап көріңіз.",
+  },
   voice_stop: { en: "Stop", ru: "Стоп", kk: "Тоқта" },
   voice_close: { en: "Close", ru: "Закрыть", kk: "Жабу" },
   voice_open_maps: { en: "Open in Maps", ru: "Открыть в Картах", kk: "Картадан ашу" },

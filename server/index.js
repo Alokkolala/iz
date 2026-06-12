@@ -5,6 +5,7 @@ import { pickReferences } from './references.js'
 import { handleVoiceChat } from './shared/voice.js'
 import { handleTranslate } from './shared/translate.js'
 import { handleWhatsappSend, handleWhatsappStatus } from './shared/whatsapp-send.js'
+import { handleVoiceStt } from './shared/stt.js'
 
 const app = express()
 app.use(express.json({ limit: '15mb' }))
@@ -747,6 +748,7 @@ app.post('/api/voice/chat', handleVoiceChat)
 app.post('/api/translate', handleTranslate)
 app.post('/api/whatsapp/send', handleWhatsappSend)
 app.get('/api/whatsapp/status', handleWhatsappStatus)
+app.post('/api/voice/stt', express.raw({ type: '*/*', limit: '20mb' }), handleVoiceStt)
 
 /**
  * TTS via OpenRouter `/audio/speech`.

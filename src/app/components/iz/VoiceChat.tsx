@@ -1672,6 +1672,14 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
 
   // STT
   const recognitionRef = useRef<any>(null);
+  // Server-STT path (fallback on mobile / Safari / Firefox where webkitSpeechRecognition is unreliable)
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recorderChunksRef = useRef<Blob[]>([]);
+  const recorderMimeRef = useRef<string>("audio/webm");
+  const vadSilenceTimerRef = useRef<number | null>(null);
+  const vadHardTimerRef = useRef<number | null>(null);
+  const vadRafRef = useRef<number | null>(null);
+  const vadHeardSpeechRef = useRef(false);
 
   // shared audio graph
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -1797,6 +1805,7 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
     return () => {
       closedRef.current = true;
       stopRecognition();
+      stopRecorder();
       stopMic();
       stopPlayback();
       ttsAbortRef.current?.abort();
@@ -1895,8 +1904,203 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
     recognitionRef.current = null;
   };
 
+  // ---------------------------------------------------------------------
+  // Server-side STT path
+  //
+  // The Web Speech API is Chrome-desktop-only in practice. On iOS Safari,
+  // Firefox, and most Android browsers it either doesn't exist or it does
+  // and silently never emits a result. So on those devices we record with
+  // MediaRecorder, run a tiny VAD (RMS-based) to auto-stop after ~1.2s of
+  // silence (or 12s hard cap), and POST the audio to /api/voice/stt which
+  // returns the transcription from Gemini multimodal.
+  // ---------------------------------------------------------------------
+  const shouldUseServerStt = (): boolean => {
+    if (typeof window === "undefined") return false;
+    const SR: any =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return true;
+    const ua = navigator.userAgent || "";
+    const isIOS = /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === "MacIntel" && (navigator as any).maxTouchPoints > 1);
+    const isFirefox = /Firefox\//.test(ua);
+    const isAndroidChrome = /Android/.test(ua);
+    return isIOS || isFirefox || isAndroidChrome;
+  };
+
+  const pickRecorderMime = (): string => {
+    const MR: any = (window as any).MediaRecorder;
+    if (!MR) return "";
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4;codecs=mp4a.40.2",
+      "audio/mp4",
+      "audio/ogg;codecs=opus",
+      "audio/ogg",
+    ];
+    for (const m of candidates) {
+      try {
+        if (MR.isTypeSupported && MR.isTypeSupported(m)) return m;
+      } catch {}
+    }
+    return "";
+  };
+
+  const clearVadTimers = () => {
+    if (vadSilenceTimerRef.current) {
+      window.clearTimeout(vadSilenceTimerRef.current);
+      vadSilenceTimerRef.current = null;
+    }
+    if (vadHardTimerRef.current) {
+      window.clearTimeout(vadHardTimerRef.current);
+      vadHardTimerRef.current = null;
+    }
+    if (vadRafRef.current) {
+      cancelAnimationFrame(vadRafRef.current);
+      vadRafRef.current = null;
+    }
+  };
+
+  const stopRecorder = () => {
+    clearVadTimers();
+    const rec = recorderRef.current;
+    if (rec && rec.state !== "inactive") {
+      try {
+        rec.stop();
+      } catch {}
+    }
+    recorderRef.current = null;
+  };
+
+  const startServerListening = useCallback(async () => {
+    if (closedRef.current) return;
+    setErrorMsg(null);
+    const MR: any = (window as any).MediaRecorder;
+    if (!MR) {
+      setErrorMsg(t("voice_no_support"));
+      setStatus("error");
+      return;
+    }
+    const ok = await startMic();
+    if (!ok || closedRef.current) return;
+    const stream = micStreamRef.current;
+    const analyser = micAnalyserRef.current;
+    if (!stream || !analyser) {
+      setStatus("idle");
+      return;
+    }
+
+    const mime = pickRecorderMime();
+    recorderMimeRef.current = mime || "audio/webm";
+    let recorder: MediaRecorder;
+    try {
+      recorder = mime ? new MR(stream, { mimeType: mime }) : new MR(stream);
+    } catch {
+      try {
+        recorder = new MR(stream);
+      } catch (e: any) {
+        setErrorMsg(String(e?.message ?? e));
+        setStatus("idle");
+        return;
+      }
+    }
+    recorderRef.current = recorder;
+    recorderChunksRef.current = [];
+    vadHeardSpeechRef.current = false;
+
+    recorder.ondataavailable = (ev: BlobEvent) => {
+      if (ev.data && ev.data.size > 0) recorderChunksRef.current.push(ev.data);
+    };
+
+    recorder.onstop = async () => {
+      clearVadTimers();
+      stopMic();
+      const chunks = recorderChunksRef.current;
+      recorderChunksRef.current = [];
+      if (closedRef.current) return;
+      const blob = new Blob(chunks, {
+        type: recorder.mimeType || recorderMimeRef.current,
+      });
+      if (!blob.size || !vadHeardSpeechRef.current) {
+        setStatus("idle");
+        return;
+      }
+      setStatus("thinking");
+      try {
+        const res = await fetch("/api/voice/stt", {
+          method: "POST",
+          headers: {
+            "Content-Type": blob.type || "audio/webm",
+            "x-lang": langRef.current,
+          },
+          body: blob,
+        });
+        if (!res.ok) throw new Error(`stt ${res.status}`);
+        const data = await res.json();
+        const text = String(data?.text || "").trim();
+        if (closedRef.current) return;
+        if (!text) {
+          setStatus("idle");
+          return;
+        }
+        handleUserUtterance(text);
+      } catch (e: any) {
+        if (closedRef.current) return;
+        setErrorMsg(t("voice_stt_failed"));
+        setStatus("idle");
+      }
+    };
+
+    try {
+      recorder.start();
+      setStatus("listening");
+    } catch (e: any) {
+      setErrorMsg(String(e?.message ?? e));
+      setStatus("idle");
+      return;
+    }
+
+    // VAD loop: read RMS off the live analyser; if it exceeds 0.03 we've
+    // heard speech, then after 1200ms of sub-threshold quiet we stop.
+    // Hard cap 12s so a stuck mic never records forever.
+    const data = new Uint8Array(analyser.fftSize);
+    const SILENCE_MS = 1200;
+    const SPEECH_THRESH = 0.035;
+    const tick = () => {
+      if (closedRef.current || !recorderRef.current) return;
+      if (recorderRef.current.state === "inactive") return;
+      analyser.getByteTimeDomainData(data);
+      let sumSq = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = (data[i] - 128) / 128;
+        sumSq += v * v;
+      }
+      const rms = Math.sqrt(sumSq / data.length);
+      if (rms > SPEECH_THRESH) {
+        vadHeardSpeechRef.current = true;
+        if (vadSilenceTimerRef.current) {
+          window.clearTimeout(vadSilenceTimerRef.current);
+          vadSilenceTimerRef.current = null;
+        }
+      } else if (vadHeardSpeechRef.current && !vadSilenceTimerRef.current) {
+        vadSilenceTimerRef.current = window.setTimeout(() => {
+          stopRecorder();
+        }, SILENCE_MS);
+      }
+      vadRafRef.current = requestAnimationFrame(tick);
+    };
+    vadRafRef.current = requestAnimationFrame(tick);
+    vadHardTimerRef.current = window.setTimeout(() => {
+      stopRecorder();
+    }, 12000);
+  }, [t]);
+
   const startListening = useCallback(async () => {
     if (closedRef.current) return;
+    if (shouldUseServerStt()) {
+      await startServerListening();
+      return;
+    }
     setErrorMsg(null);
     const SR: any =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -2078,6 +2282,7 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
 
     if (status === "listening") {
       stopRecognition();
+      stopRecorder();
       stopMic();
       setStatus("idle");
       return;
@@ -2106,6 +2311,7 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
   const handleClose = () => {
     closedRef.current = true;
     stopRecognition();
+    stopRecorder();
     stopMic();
     stopPlayback();
     ttsAbortRef.current?.abort();
