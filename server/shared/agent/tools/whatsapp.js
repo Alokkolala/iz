@@ -1,7 +1,9 @@
 // whatsapp.js — book-via-WhatsApp tool.
-// Finds a phone for a named place (OSM Overpass first, DuckDuckGo fallback),
+// Finds a phone for a named place (local cache → OSM Overpass → web search),
 // builds a wa.me deep link with the LLM-drafted message, and surfaces the
 // "Send now" affordance if the optional whatsapp-worker is configured.
+
+import { lookupCachedPhone } from './whatsapp-places.js'
 
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
@@ -121,6 +123,19 @@ export async function buildWhatsappBooking({ name, message, phone, location, sea
 
   let resolved = phone ? normaliseE164(phone) : null
   let source = phone ? 'user' : null
+  let matchedName = null
+
+  if (!resolved) {
+    const cached = lookupCachedPhone(cleanName)
+    if (cached) {
+      const norm = normaliseE164(cached.phone)
+      if (norm) {
+        resolved = norm
+        source = cached.source
+        matchedName = cached.name
+      }
+    }
+  }
 
   if (!resolved) {
     const osm = await findPhoneOSM(cleanName, location)
@@ -140,7 +155,7 @@ export async function buildWhatsappBooking({ name, message, phone, location, sea
   const waUrl = buildWaUrl(resolved, draft)
   return {
     kind: 'whatsapp',
-    name: cleanName,
+    name: matchedName || cleanName,
     phone: resolved,
     phoneDisplay: formatDisplay(resolved),
     draft,
