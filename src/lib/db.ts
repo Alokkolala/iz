@@ -108,6 +108,50 @@ export async function respondInvite(id: string, status: 'accepted' | 'declined')
   if (error) throw error
 }
 
+// ---- voice chat history -----------------------------------------------
+
+export interface ChatRow {
+  id: string
+  user_id: string
+  role: 'user' | 'assistant'
+  text: string
+  action: unknown
+  suggestions: unknown
+  created_at: string
+}
+
+export async function listChatMessages(userId: string, limit = 60): Promise<ChatRow[]> {
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .select('id, user_id, role, text, action, suggestions, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return ((data ?? []) as ChatRow[]).reverse()
+}
+
+export async function saveChatMessage(
+  userId: string,
+  role: 'user' | 'assistant',
+  text: string,
+  action: unknown = null,
+  suggestions: unknown = null,
+) {
+  const { error } = await supabase
+    .from('chat_messages')
+    .insert({ user_id: userId, role, text, action, suggestions })
+  if (error) throw error
+}
+
+export async function clearChatHistory(userId: string) {
+  const { error } = await supabase
+    .from('chat_messages')
+    .delete()
+    .eq('user_id', userId)
+  if (error) throw error
+}
+
 // ---- account deletion (server-side) -----------------------------------
 
 export async function deleteAccount() {

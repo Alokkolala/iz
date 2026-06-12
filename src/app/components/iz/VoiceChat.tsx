@@ -4,6 +4,7 @@ import { useI18n, type Lang } from "./i18n";
 import { X } from "./Icons";
 import { Stone3D } from "./Stone3D";
 import { useAuth } from "../../../lib/AuthProvider";
+import { clearChatHistory, listChatMessages, saveChatMessage } from "../../../lib/db";
 
 const VoiceSphere = lazy(() => import("./VoiceSphere"));
 
@@ -481,6 +482,138 @@ function SightCard({
       </div>
     </div>
   );
+}
+
+function parseAction(a: any): Action | null {
+  if (!a || typeof a !== "object") return null;
+  if (a.kind === "directions" && a.url) {
+    return {
+      kind: "directions",
+      destination: String(a.destination ?? ""),
+      url: String(a.url),
+    };
+  }
+  if (a.kind === "places" && a.embedUrl) {
+    return {
+      kind: "places",
+      category: String(a.category ?? "attraction"),
+      embedUrl: String(a.embedUrl),
+      listUrl: String(a.listUrl ?? a.embedUrl),
+      origin: a.origin ?? { lat: 0, lon: 0 },
+      items: Array.isArray(a.items)
+        ? a.items
+            .filter((p: any) => p && Number.isFinite(p.lat) && Number.isFinite(p.lon))
+            .map((p: any) => ({
+              name: String(p.name ?? ""),
+              lat: Number(p.lat),
+              lon: Number(p.lon),
+              addr: p.addr ?? null,
+              distance_km: Number(p.distance_km ?? 0),
+              url: String(p.url ?? ""),
+            }))
+        : [],
+    };
+  }
+  if (a.kind === "sight" && Array.isArray(a.photos) && a.photos.length) {
+    return {
+      kind: "sight",
+      bucket: String(a.bucket ?? "mangystau"),
+      routeUrl: String(a.routeUrl ?? ""),
+      photos: a.photos
+        .filter((p: any) => p && typeof p.src === "string")
+        .map((p: any) => ({
+          src: String(p.src),
+          tip: String(p.tip ?? ""),
+          attribution: p.attribution ?? undefined,
+          sourceUrl: p.sourceUrl ?? undefined,
+          license: p.license ?? undefined,
+        })),
+    };
+  }
+  if (a.kind === "weather" && Number.isFinite(a.tempC)) {
+    return {
+      kind: "weather",
+      origin: a.origin ?? { lat: 0, lon: 0 },
+      tempC: Number(a.tempC),
+      windKmh: Number(a.windKmh ?? 0),
+      code: Number(a.code ?? 0),
+      label: String(a.label ?? ""),
+      sunrise: a.sunrise ?? null,
+      sunset: a.sunset ?? null,
+      tomorrow: {
+        maxC: Number(a.tomorrow?.maxC ?? 0),
+        minC: Number(a.tomorrow?.minC ?? 0),
+        label: String(a.tomorrow?.label ?? ""),
+      },
+    };
+  }
+  if (a.kind === "plan" && Array.isArray(a.blocks)) {
+    return {
+      kind: "plan",
+      mood: typeof a.mood === "string" ? a.mood : null,
+      origin: a.origin ?? { lat: 0, lon: 0 },
+      blocks: a.blocks
+        .filter((b: any) => b && Array.isArray(b.items))
+        .map((b: any) => ({
+          label: b.label === "food" || b.label === "view" ? b.label : "sight",
+          items: b.items.map((it: any) => ({
+            name: it?.name ? String(it.name) : undefined,
+            tip: it?.tip ? String(it.tip) : undefined,
+          })),
+        })),
+    };
+  }
+  if (a.kind === "web_results" && Array.isArray(a.items)) {
+    return {
+      kind: "web_results",
+      query: String(a.query ?? ""),
+      items: a.items
+        .filter((r: any) => r && typeof r.url === "string" && typeof r.title === "string")
+        .map((r: any) => ({
+          title: String(r.title),
+          url: String(r.url),
+          snippet: String(r.snippet ?? ""),
+        })),
+    };
+  }
+  if (a.kind === "route" && typeof a.url === "string" && Array.isArray(a.stops)) {
+    return {
+      kind: "route",
+      url: String(a.url),
+      origin: a.origin ?? null,
+      stops: a.stops
+        .filter((s: any) => s && Number.isFinite(s.lat) && Number.isFinite(s.lon))
+        .map((s: any) => ({
+          name: String(s.name ?? ""),
+          display: String(s.display ?? s.name ?? ""),
+          lat: Number(s.lat),
+          lon: Number(s.lon),
+        })),
+    };
+  }
+  if (a.kind === "recommend" && Array.isArray(a.items)) {
+    return {
+      kind: "recommend",
+      mood: typeof a.mood === "string" ? a.mood : null,
+      timeOfDay: String(a.timeOfDay ?? ""),
+      weatherNote: a.weatherNote ? String(a.weatherNote) : null,
+      factsApplied: a.factsApplied ? String(a.factsApplied) : null,
+      items: a.items
+        .filter((i: any) => i && typeof i.title === "string")
+        .map((i: any) => ({
+          type: i.type === "food" || i.type === "view" ? i.type : "sight",
+          title: String(i.title),
+          reason: String(i.reason ?? ""),
+          photo: typeof i.photo === "string" ? i.photo : null,
+          url: typeof i.url === "string" ? i.url : undefined,
+          action:
+            i.action?.kind === "show_sight" && typeof i.action.bucket === "string"
+              ? { kind: "show_sight" as const, bucket: String(i.action.bucket) }
+              : undefined,
+        })),
+    };
+  }
+  return null;
 }
 
 function safeHost(url: string): string {
@@ -1255,10 +1388,40 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
   const messagesRef = useRef<Msg[]>([]);
   const langRef = useRef<Lang>(lang);
   const closedRef = useRef(false);
+  const userIdRef = useRef<string | null>(user?.id ?? null);
 
   statusRef.current = status;
   messagesRef.current = messages;
   langRef.current = lang;
+  userIdRef.current = user?.id ?? null;
+
+  // load persisted chat history for signed-in users. Anonymous users get a
+  // fresh ephemeral session each open.
+  useEffect(() => {
+    const uid = user?.id;
+    if (!uid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await listChatMessages(uid, 60);
+        if (cancelled) return;
+        const restored: Msg[] = rows.map((r) => ({
+          role: r.role,
+          text: r.text,
+          action: parseAction(r.action),
+          suggestions: Array.isArray(r.suggestions)
+            ? (r.suggestions as unknown[]).filter((s): s is string => typeof s === "string")
+            : undefined,
+        }));
+        setMessages(restored);
+      } catch {
+        /* ignore — fall back to empty session */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   // ask the browser for the user's coordinates once. If they decline, we
   // simply continue without — the LLM is told to ask for it when needed.
@@ -1483,6 +1646,10 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
     setMessages(next);
     setStatus("thinking");
     stopMic();
+    const uid = userIdRef.current;
+    if (uid) {
+      saveChatMessage(uid, "user", trimmed).catch(() => {});
+    }
 
     try {
       // Find the most recent assistant action so the server can inject memory
@@ -1498,133 +1665,13 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
           lang: langRef.current,
           location: locationRef.current,
           lastAction: lastAssistantAction,
-          userId: user?.id ?? null,
+          userId: uid ?? null,
         }),
       });
       if (!res.ok) throw new Error("network");
       const data = await res.json();
       const reply: string = (data?.text || "").trim();
-      let action: Action | null = null;
-      const a = data?.action;
-      if (a && a.kind === "directions" && a.url) {
-        action = {
-          kind: "directions",
-          destination: String(a.destination ?? ""),
-          url: String(a.url),
-        };
-      } else if (a && a.kind === "places" && a.embedUrl) {
-        action = {
-          kind: "places",
-          category: String(a.category ?? "attraction"),
-          embedUrl: String(a.embedUrl),
-          listUrl: String(a.listUrl ?? a.embedUrl),
-          origin: a.origin ?? { lat: 0, lon: 0 },
-          items: Array.isArray(a.items)
-            ? a.items
-                .filter((p: any) => p && Number.isFinite(p.lat) && Number.isFinite(p.lon))
-                .map((p: any) => ({
-                  name: String(p.name ?? ""),
-                  lat: Number(p.lat),
-                  lon: Number(p.lon),
-                  addr: p.addr ?? null,
-                  distance_km: Number(p.distance_km ?? 0),
-                  url: String(p.url ?? ""),
-                }))
-            : [],
-        };
-      } else if (a && a.kind === "sight" && Array.isArray(a.photos) && a.photos.length) {
-        action = {
-          kind: "sight",
-          bucket: String(a.bucket ?? "mangystau"),
-          routeUrl: String(a.routeUrl ?? ""),
-          photos: a.photos
-            .filter((p: any) => p && typeof p.src === "string")
-            .map((p: any) => ({
-              src: String(p.src),
-              tip: String(p.tip ?? ""),
-              attribution: p.attribution ?? undefined,
-              sourceUrl: p.sourceUrl ?? undefined,
-              license: p.license ?? undefined,
-            })),
-        };
-      } else if (a && a.kind === "weather" && Number.isFinite(a.tempC)) {
-        action = {
-          kind: "weather",
-          origin: a.origin ?? { lat: 0, lon: 0 },
-          tempC: Number(a.tempC),
-          windKmh: Number(a.windKmh ?? 0),
-          code: Number(a.code ?? 0),
-          label: String(a.label ?? ""),
-          sunrise: a.sunrise ?? null,
-          sunset: a.sunset ?? null,
-          tomorrow: {
-            maxC: Number(a.tomorrow?.maxC ?? 0),
-            minC: Number(a.tomorrow?.minC ?? 0),
-            label: String(a.tomorrow?.label ?? ""),
-          },
-        };
-      } else if (a && a.kind === "plan" && Array.isArray(a.blocks)) {
-        action = {
-          kind: "plan",
-          mood: typeof a.mood === "string" ? a.mood : null,
-          origin: a.origin ?? { lat: 0, lon: 0 },
-          blocks: a.blocks
-            .filter((b: any) => b && Array.isArray(b.items))
-            .map((b: any) => ({
-              label: b.label === "food" || b.label === "view" ? b.label : "sight",
-              items: b.items.map((it: any) => ({
-                name: it?.name ? String(it.name) : undefined,
-                tip: it?.tip ? String(it.tip) : undefined,
-              })),
-            })),
-        };
-      } else if (a && a.kind === "web_results" && Array.isArray(a.items)) {
-        action = {
-          kind: "web_results",
-          query: String(a.query ?? ""),
-          items: a.items
-            .filter((r: any) => r && typeof r.url === "string" && typeof r.title === "string")
-            .map((r: any) => ({
-              title: String(r.title),
-              url: String(r.url),
-              snippet: String(r.snippet ?? ""),
-            })),
-        };
-      } else if (a && a.kind === "route" && typeof a.url === "string" && Array.isArray(a.stops)) {
-        action = {
-          kind: "route",
-          url: String(a.url),
-          origin: a.origin ?? null,
-          stops: a.stops
-            .filter((s: any) => s && Number.isFinite(s.lat) && Number.isFinite(s.lon))
-            .map((s: any) => ({
-              name: String(s.name ?? ""),
-              display: String(s.display ?? s.name ?? ""),
-              lat: Number(s.lat),
-              lon: Number(s.lon),
-            })),
-        };
-      } else if (a && a.kind === "recommend" && Array.isArray(a.items)) {
-        action = {
-          kind: "recommend",
-          mood: typeof a.mood === "string" ? a.mood : null,
-          timeOfDay: String(a.timeOfDay ?? ""),
-          weatherNote: a.weatherNote ? String(a.weatherNote) : null,
-          factsApplied: a.factsApplied ? String(a.factsApplied) : null,
-          items: a.items
-            .filter((i: any) => i && typeof i.title === "string")
-            .map((i: any) => ({
-              type: i.type === "food" || i.type === "view" ? i.type : "sight",
-              title: String(i.title),
-              reason: String(i.reason ?? ""),
-              photo: typeof i.photo === "string" ? i.photo : null,
-              url: typeof i.url === "string" ? i.url : undefined,
-              action: i.action?.kind === "show_sight" && typeof i.action.bucket === "string"
-                ? { kind: "show_sight" as const, bucket: String(i.action.bucket) }
-                : undefined,
-            })),
-        };
-      }
+      const action: Action | null = parseAction(data?.action);
       const suggestions: string[] = Array.isArray(data?.suggestions)
         ? data.suggestions.filter((s: any) => typeof s === "string" && s.length).slice(0, 3)
         : [];
@@ -1637,6 +1684,9 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
         ...cur,
         { role: "assistant", text: reply, action, suggestions },
       ]);
+      if (uid) {
+        saveChatMessage(uid, "assistant", reply, action, suggestions).catch(() => {});
+      }
       await playReply(reply);
     } catch (e: any) {
       if (closedRef.current) return;
@@ -1736,6 +1786,17 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
     startListening();
   };
 
+  const handleClear = useCallback(() => {
+    const uid = userIdRef.current;
+    if (!uid) {
+      setMessages([]);
+      return;
+    }
+    if (typeof window !== "undefined" && !window.confirm(t("voice_clear_confirm"))) return;
+    setMessages([]);
+    clearChatHistory(uid).catch(() => {});
+  }, [t]);
+
   const handleClose = () => {
     closedRef.current = true;
     stopRecognition();
@@ -1805,18 +1866,51 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
             {t("voice_title")}
           </p>
         </div>
-        <button
-          onClick={handleClose}
-          aria-label={t("voice_close")}
-          className="flex h-10 w-10 items-center justify-center rounded-full focus-visible:outline-none"
-          style={{
-            background: "rgba(255,255,255,0.16)",
-            border: "1px solid rgba(255,255,255,0.22)",
-            color: "#fff",
-          }}
-        >
-          <X size={18} />
-        </button>
+        <div className="flex items-center gap-2">
+          {messages.length > 0 && (
+            <button
+              onClick={handleClear}
+              aria-label={t("voice_clear")}
+              title={t("voice_clear")}
+              className="flex h-10 w-10 items-center justify-center rounded-full focus-visible:outline-none"
+              style={{
+                background: "rgba(255,255,255,0.10)",
+                border: "1px solid rgba(255,255,255,0.18)",
+                color: "#fff",
+              }}
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M3 6h18" />
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+              </svg>
+            </button>
+          )}
+          <button
+            onClick={handleClose}
+            aria-label={t("voice_close")}
+            className="flex h-10 w-10 items-center justify-center rounded-full focus-visible:outline-none"
+            style={{
+              background: "rgba(255,255,255,0.16)",
+              border: "1px solid rgba(255,255,255,0.22)",
+              color: "#fff",
+            }}
+          >
+            <X size={18} />
+          </button>
+        </div>
       </div>
 
       {/* Sphere stage */}

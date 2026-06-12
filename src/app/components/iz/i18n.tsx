@@ -258,6 +258,12 @@ export const STRINGS: Dict = {
   voice_open_route: { en: "Open in Maps", ru: "Открыть маршрут", kk: "Картадан ашу" },
   voice_recommendations: { en: "For you", ru: "Тебе", kk: "Саған" },
   voice_recommend_show_me: { en: "Show me", ru: "Покажи мне", kk: "Маған көрсет" },
+  voice_clear: { en: "Clear chat", ru: "Очистить чат", kk: "Чатты тазарту" },
+  voice_clear_confirm: {
+    en: "Clear all chat history?",
+    ru: "Очистить всю историю чата?",
+    kk: "Барлық чат тарихын өшіру керек пе?",
+  },
 };
 
 interface I18nCtx {
