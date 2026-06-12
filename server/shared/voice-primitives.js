@@ -359,7 +359,7 @@ const NEAR_KEYWORDS = [
 ]
 const WEATHER_RE = /погод|прогноз|ауа рай|\bweather\b|\bforecast\b|температур|жарко|холодно|will it rain|дожд|ветер|снег|\bwind\b|sunrise|sunset|закат|восход/i
 const NEAR_GENERIC_RE = /(что|where).{0,8}(рядом|вокруг|around|near|nearby|close to me|поблизости|near me)/i
-const GO_RE = /(take me to|route to|поехали в|как добраться до|проложи маршрут|маршрут до|маршрут для до|drive me to|navigate to|проводи меня|проводи до)/i
+const GO_RE = /(take me to|route to|how (?:do|can) i get to|how to get to|поехали в|как добраться до|как попасть (?:до|в|к|на)|как доехать до|как пройти (?:до|в|к)|проложи маршрут|маршрут до|маршрут для до|drive me to|navigate to|проводи меня|проводи до|қалай бару|қалай жету|қалай өту)/i
 const NEAREST_RE = /(ближайш|nearest|closest|самый близкий|самой близкой)/i
 const RECALL_RE = /(ту точк|эту точк|что (?:ты )?показал|показал.{0,12}карт|что это (?:был[оа]|за)|where did you|that map|that pin|that point|тот пин|та метк)/i
 const NEAR_VERB_RE = /(скажи|найди|поищ|посовет|покажи мне|подскажи|есть ли|какие|какой|какая|какое|самый|самая|самое|самые|лучш|новейш|tell me|find me?|show me|which|what(?:'s| is) the|recommend|nearest|best|newest)/i
