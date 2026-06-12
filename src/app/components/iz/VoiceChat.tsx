@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useI18n, type Lang } from "./i18n";
+import { TranslateCard, type TranslateAction } from "./TranslateCard";
 import { X } from "./Icons";
 import { Stone3D } from "./Stone3D";
 import { useAuth } from "../../../lib/AuthProvider";
@@ -124,7 +125,7 @@ type WhatsAppAction = {
   source: "user" | "osm" | "web" | null;
   canSendDirect: boolean;
 };
-type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction | PlanAction | WebResultsAction | RouteAction | RecommendAction | WhatsAppAction;
+type Action = DirectionsAction | PlacesAction | SightAction | WeatherAction | PlanAction | WebResultsAction | RouteAction | RecommendAction | WhatsAppAction | TranslateAction;
 type Msg = {
   role: "user" | "assistant";
   text: string;
@@ -649,6 +650,18 @@ function parseAction(a: any): Action | null {
               ? { kind: "show_sight" as const, bucket: String(i.action.bucket) }
               : undefined,
         })),
+    };
+  }
+  if (a.kind === "translate" && typeof a.translatedText === "string" && typeof a.originalText === "string") {
+    const langs: Array<"en" | "ru" | "kk"> = ["en", "ru", "kk"];
+    const originalLang = langs.includes(a.originalLang) ? a.originalLang : "en";
+    const targetLang = langs.includes(a.targetLang) ? a.targetLang : "ru";
+    return {
+      kind: "translate",
+      originalText: String(a.originalText),
+      originalLang,
+      translatedText: String(a.translatedText),
+      targetLang,
     };
   }
   return null;
@@ -1328,6 +1341,13 @@ function Bubble({
   labelWaNoPhone,
   labelWaDraft,
   labelWaTo,
+  labelTrKicker,
+  labelTrSpeak,
+  labelTrHand,
+  labelTrListening,
+  labelTrReplied,
+  labelTrNewRound,
+  labelTrErrorGeneric,
 }: {
   msg: Msg;
   isLast: boolean;
@@ -1355,6 +1375,13 @@ function Bubble({
   labelWaNoPhone: string;
   labelWaDraft: string;
   labelWaTo: string;
+  labelTrKicker: string;
+  labelTrSpeak: string;
+  labelTrHand: string;
+  labelTrListening: string;
+  labelTrReplied: string;
+  labelTrNewRound: string;
+  labelTrErrorGeneric: string;
 }) {
   if (msg.role === "user") {
     return (
@@ -1460,6 +1487,18 @@ function Bubble({
             action={msg.action}
             label={labelRecommendations}
             onPickSight={(bucket) => onSuggestion(`${recommendShowMe} ${bucket}`)}
+          />
+        )}
+        {msg.action?.kind === "translate" && (
+          <TranslateCard
+            action={msg.action}
+            labelKicker={labelTrKicker}
+            labelSpeakToLocal={labelTrSpeak}
+            labelHandToLocal={labelTrHand}
+            labelListeningLocal={labelTrListening}
+            labelReplied={labelTrReplied}
+            labelNewRound={labelTrNewRound}
+            labelErrorGeneric={labelTrErrorGeneric}
           />
         )}
         {isLast && msg.suggestions && msg.suggestions.length > 0 && (
@@ -2260,6 +2299,13 @@ export function VoiceChat({ onClose }: VoiceChatProps) {
                 labelWaNoPhone={t("voice_wa_no_phone")}
                 labelWaDraft={t("voice_wa_draft")}
                 labelWaTo={t("voice_wa_to")}
+                labelTrKicker={t("tr_kicker")}
+                labelTrSpeak={t("tr_speak_to_local")}
+                labelTrHand={t("tr_hand_to_local")}
+                labelTrListening={t("tr_listening_local")}
+                labelTrReplied={t("tr_replied")}
+                labelTrNewRound={t("tr_new_round")}
+                labelTrErrorGeneric={t("tr_error_generic")}
               />
             ))}
             {status === "thinking" && <TypingRow key="typing" />}
