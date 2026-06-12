@@ -1,6 +1,46 @@
 import { pickReferences } from '../../../references.js'
 import { fetchWeather, searchOSMPlaces } from '../../voice-primitives.js'
 import { loadUserFacts } from '../memory.js'
+import { pickTopPicks } from './whatsapp-places.js'
+
+const CURATED_CATEGORIES = new Set(['hotel', 'restaurant', 'tour'])
+
+function gmapsSearchUrl(name) {
+  return `https://www.google.com/maps/search/${encodeURIComponent(name + ', Aktau, Kazakhstan')}`
+}
+
+function formatPhone(e164) {
+  if (!e164) return ''
+  const m = e164.match(/^\+(\d{1,3})(\d{3})(\d{3})(\d+)$/)
+  return m ? `+${m[1]} ${m[2]} ${m[3]} ${m[4]}` : e164
+}
+
+const CATEGORY_HEADLINE = {
+  hotel: { en: 'Top hotels in Aktau', ru: 'Лучшие отели Актау', kk: 'Ақтаудағы үздік қонақүйлер' },
+  restaurant: { en: 'Top picks to eat', ru: 'Куда сходить поесть', kk: 'Тамақтанарлық жерлер' },
+  tour: { en: 'Top Mangystau tour operators', ru: 'Лучшие тур-операторы по Мангистау', kk: 'Маңғыстау бойынша үздік тур-операторлар' },
+}
+
+function buildCuratedRecommendations({ category, lang, vibe }) {
+  const picks = pickTopPicks(category, { lang, vibe, limit: 3 })
+  if (!picks.length) return null
+  const headline = CATEGORY_HEADLINE[category]?.[lang] || CATEGORY_HEADLINE[category]?.en || category
+  return {
+    mood: vibe || null,
+    timeOfDay: headline,
+    weatherNote: null,
+    factsApplied: null,
+    items: picks.map((p) => ({
+      type: category,
+      title: p.name,
+      reason: p.pitch || formatPhone(p.phone),
+      phone: p.phone,
+      phoneDisplay: formatPhone(p.phone),
+      url: gmapsSearchUrl(p.name),
+      tier: p.tier,
+    })),
+  }
+}
 
 const SIGHTS = ['bozzhyra', 'sherkala', 'tuzbair', 'kyzylkup', 'torysh', 'caspian']
 
@@ -21,7 +61,11 @@ function timeOfDay(now = new Date()) {
   return 'evening'
 }
 
-export async function buildRecommendations({ location, mood, userId, lang }) {
+export async function buildRecommendations({ location, mood, userId, lang, category, vibe }) {
+  if (category && CURATED_CATEGORIES.has(category)) {
+    const curated = buildCuratedRecommendations({ category, lang, vibe: vibe || mood })
+    if (curated) return curated
+  }
   if (!location) return null
   const [weather, food, viewpoints, facts] = await Promise.all([
     fetchWeather(location.lat, location.lon, lang).catch(() => null),

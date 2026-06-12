@@ -96,11 +96,14 @@ type RouteAction = {
   origin: { lat: number; lon: number } | null;
 };
 type RecommendItem = {
-  type: "sight" | "food" | "view";
+  type: "sight" | "food" | "view" | "hotel" | "restaurant" | "tour";
   title: string;
   reason: string;
   photo?: string | null;
   url?: string;
+  phone?: string | null;
+  phoneDisplay?: string | null;
+  tier?: number;
   action?: { kind: "show_sight"; bucket: string };
 };
 type RecommendAction = {
@@ -1206,7 +1209,15 @@ function RecommendCard({
                   flexShrink: 0,
                 }}
               >
-                {item.type === "food" ? "🍽" : item.type === "view" ? "🌄" : "📸"}
+                {item.type === "hotel"
+                  ? "🏨"
+                  : item.type === "restaurant" || item.type === "food"
+                    ? "🍽"
+                    : item.type === "tour"
+                      ? "🚙"
+                      : item.type === "view"
+                        ? "🌄"
+                        : "📸"}
               </div>
             )}
             <div className="min-w-0 flex-1">
@@ -1229,24 +1240,59 @@ function RecommendCard({
                   Show me
                 </button>
               )}
-              {item.url && (
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 inline-block rounded-full px-2.5 py-1"
-                  style={{
-                    background: "rgba(255,255,255,0.10)",
-                    border: "1px solid rgba(255,255,255,0.22)",
-                    color: "#fff",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    textDecoration: "none",
-                  }}
-                >
-                  Open ↗
-                </a>
-              )}
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {item.url && (
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block rounded-full px-2.5 py-1"
+                    style={{
+                      background: "rgba(255,255,255,0.10)",
+                      border: "1px solid rgba(255,255,255,0.22)",
+                      color: "#fff",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      textDecoration: "none",
+                    }}
+                  >
+                    Open ↗
+                  </a>
+                )}
+                {item.phone && (
+                  <a
+                    href={`https://wa.me/${item.phone.replace(/[^\d]/g, "")}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block rounded-full px-2.5 py-1"
+                    style={{
+                      background: "rgba(37,211,102,0.18)",
+                      border: "1px solid rgba(37,211,102,0.55)",
+                      color: "#25d366",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      textDecoration: "none",
+                    }}
+                  >
+                    WhatsApp
+                  </a>
+                )}
+                {item.tier === 1 && (
+                  <span
+                    className="inline-block rounded-full px-2 py-0.5"
+                    style={{
+                      background: "rgba(250,204,21,0.16)",
+                      border: "1px solid rgba(250,204,21,0.45)",
+                      color: "#facc15",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    TOP
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         ))}

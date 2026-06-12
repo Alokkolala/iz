@@ -134,11 +134,12 @@ export const TOOL_SCHEMA = [
     type: 'function',
     function: {
       name: 'recommend',
-      description: 'Proactive personalised recommendations: combines time of day, weather, user memory, and nearby places. Use for "what should I do", "recommend me", "surprise me".',
+      description: 'Curated personalised recommendations. Two modes:\n• Open-ended ("what should I do", "surprise me"): leave category empty, combines time of day, weather, user memory, and nearby places.\n• Best-of-category ("which hotel is the best", "recommend a restaurant", "самый-самый отель", "лучший тур"): pass category=hotel|restaurant|tour. Returns the hand-ranked top picks from the curated Aktau/Mangystau cache with phones for WhatsApp booking — NOT nearest-neighbour OSM. Always prefer this over search_pois when the user asks for the "best", "top", "most impressive", or "recommended" hotel/restaurant/tour.',
       parameters: {
         type: 'object',
         properties: {
-          mood: { type: 'string', description: 'Optional mood: photo, family, active, lazy, foodie, golden_hour.' },
+          category: { type: 'string', description: 'Optional. hotel | restaurant | tour. Set when the user asks for the best/top/most impressive/recommended one.' },
+          mood: { type: 'string', description: 'Optional mood/vibe: luxury, family, business, photo, foodie, budget, view, pub.' },
         },
       },
     },
@@ -324,11 +325,15 @@ export async function dispatchTool(name, args, ctx) {
 
   if (name === 'recommend') {
     const mood = args?.mood ? String(args.mood).slice(0, 40) : null
+    const rawCategory = args?.category ? String(args.category).toLowerCase().slice(0, 20) : null
+    const category = rawCategory && ['hotel', 'restaurant', 'tour'].includes(rawCategory) ? rawCategory : null
     const rec = await buildRecommendations({
       location: loc,
       mood,
       userId: ctx.userId,
       lang: L,
+      category,
+      vibe: mood,
     })
     if (!rec) return { toolResult: { error: 'no_location' } }
     return {
@@ -337,7 +342,8 @@ export async function dispatchTool(name, args, ctx) {
         timeOfDay: rec.timeOfDay,
         weatherNote: rec.weatherNote,
         factsApplied: rec.factsApplied,
-        picks: rec.items.map((i) => ({ type: i.type, title: i.title })),
+        category,
+        picks: rec.items.map((i) => ({ type: i.type, title: i.title, phone: i.phone || null })),
       },
     }
   }
