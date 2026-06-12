@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { z } from 'zod'
 import { pickReferences } from './references.js'
 import { handleVoiceChat } from './shared/voice.js'
+import { handleTranslate } from './shared/translate.js'
 import { handleWhatsappSend, handleWhatsappStatus } from './shared/whatsapp-send.js'
 
 const app = express()
@@ -743,6 +744,7 @@ function narrateForcedAction(intent, action, L) {
 }
 
 app.post('/api/voice/chat', handleVoiceChat)
+app.post('/api/translate', handleTranslate)
 app.post('/api/whatsapp/send', handleWhatsappSend)
 app.get('/api/whatsapp/status', handleWhatsappStatus)
 
